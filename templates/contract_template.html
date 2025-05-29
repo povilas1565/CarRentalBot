@@ -1,0 +1,58 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <title>Договор аренды автомобиля №{{ booking.id }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+        h1 { text-align: center; }
+        .section { margin-bottom: 20px; }
+        .label { font-weight: bold; }
+        .signature-line { margin-top: 40px; }
+    </style>
+</head>
+<body>
+<h1>Договор аренды автомобиля №{{ booking.id }}</h1>
+
+<div class="section">
+    <p><span class="label">Арендатор:</span> {{ user.name }}</p>
+    <p><span class="label">Паспорт / ID:</span> {{ user.passport or "—" }}</p>
+    <p><span class="label">Телефон:</span> {{ user.phone }}</p>
+    <p><span class="label">Email:</span> {{ user.email }}</p>
+</div>
+
+<div class="section">
+    <p><span class="label">Автомобиль:</span> {{ car.brand }} {{ car.model }}, {{ car.year }}</p>
+    <p><span class="label">Номер автомобиля:</span> {{ car.license_plate or "—" }}</p>
+    <p><span class="label">VIN:</span> {{ car.vin or "—" }}</p>
+</div>
+
+<div class="section">
+    <p><span class="label">Период аренды:</span> с {{ booking.date_from.strftime('%d.%m.%Y') }} по {{ booking.date_to.strftime('%d.%m.%Y') }}</p>
+    <p><span class="label">Стоимость аренды:</span> {{ booking.total_price }} ₽</p>
+    <p><span class="label">Статус бронирования:</span> {{ booking.status.value }}</p>
+</div>
+
+<div class="section">
+    <p>Настоящим подтверждаю, что ознакомлен(а) с условиями аренды автомобиля и обязуюсь их соблюдать.</p>
+    <p>Дата заключения договора: {{ booking.created_at.strftime('%d.%m.%Y') }}</p>
+</div>
+
+{% if contract.signed %}
+<div class="section">
+    <p><span class="label">Контракт подписан:</span> Да</p>
+    {% if contract.signature_data %}
+    <p><span class="label">Подпись (данные):</span> {{ contract.signature_data }}</p>
+    {% endif %}
+</div>
+{% else %}
+<div class="section">
+    <p><span class="label">Контракт подписан:</span> Нет</p>
+</div>
+{% endif %}
+
+<div class="signature-line">
+    <p>Подпись арендатора: ___________________________</p>
+</div>
+</body>
+</html>

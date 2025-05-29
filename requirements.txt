@@ -1,0 +1,13 @@
+﻿pip~=23.2.1
+wheel~=0.41.2
+setuptools~=68.2.0
+python-telegram-bot==20.3
+SQLAlchemy==2.0.18
+psycopg2-binary==2.9.6
+qrcode==7.3.1
+requests==2.31.0
+Jinja2==3.1.2
+reportlab==3.6.12
+PyPDF2==3.0.1
+loguru==0.7.0
+stripe
