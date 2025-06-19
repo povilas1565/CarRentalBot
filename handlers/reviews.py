@@ -1,11 +1,8 @@
-﻿from PyQt5.QtCore.QProcess import state
+﻿
 from aiogram import types
-from aiogram.contrib.fsm_storage.mongo import STATE
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from sqlalchemy import func
-from tensorflow.python.feature_column.feature_column_v2 import StateManager
-from win32comext.axscript.client.framework import state_map
 
 from database import SessionLocal
 from models.car import Car

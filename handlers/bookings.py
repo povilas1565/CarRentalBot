@@ -196,6 +196,6 @@ def register_bookings_handlers(dp: Dispatcher):
     dp.register_message_handler(select_date_to, state=BookingFSM.select_date_to)
     dp.register_message_handler(
         confirm_booking,
-        filter=lambda msg: msg.text.lower() in ["да", "нет"],
+        lambda msg: msg.text.lower() in ["да", "нет"],  # ← исправлено
         state=BookingFSM.confirm_booking
     )
