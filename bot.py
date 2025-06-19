@@ -3,9 +3,13 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import ParseMode
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from config import BOT_TOKEN
+from database import Base, engine
 from handlers import registration, cars, bookings, contracts, payments, reviews, calculator
 from loguru import logger
 import asyncio
+
+print("Creating tables...")
+Base.metadata.create_all(bind=engine)
 
 logger.add("logs/bot.log", rotation="10 MB", compression="zip")
 
