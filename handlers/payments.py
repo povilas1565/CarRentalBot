@@ -18,8 +18,8 @@ stripe.api_key = "YOUR_STRIPE_SECRET_KEY"
 
 # Freekassa настройки (замени на свои)
 FREEKASSA_MERCHANT_ID = "your_merchant_id"
-FREEKASSA_SECRET_1 = "your_secret_1"
-FREEKASSA_SECRET_2 = "your_secret_2"
+FREEKASSA_SECRET_1 = "gq=!Ap[D7)mS3i1"
+FREEKASSA_SECRET_2 = "HdatG]bYxMkJ4IT"
 FREEKASSA_PAY_URL = "https://pay.freekassa.ru/"
 
 # NBS QR данные
@@ -64,25 +64,25 @@ def generate_nbs_qr(booking: Booking):
     return bio
 
 
-def create_stripe_payment_link(booking: Booking):
-    try:
-        payment_link = stripe.PaymentLink.create(
-            line_items=[{
-                "price_data": {
-                    "currency": "eur",
-                    "product_data": {
-                        "name": f"Аренда {booking.car.model} {booking.date_from}–{booking.date_to}",
-                    },
-                    "unit_amount": int(booking.total_price * 100),
-                },
-                "quantity": 1,
-            }],
-            after_completion={"type": "redirect", "redirect": {"url": "https://myrentcar.rs/thankyou"}},
-        )
-        return payment_link.url
-    except Exception as e:
-        print(f"Stripe error: {e}")
-        return None
+# def create_stripe_payment_link(booking: Booking):
+#    try:
+#        payment_link = stripe.PaymentLink.create(
+#            line_items=[{
+#                "price_data": {
+#                    "currency": "eur",
+#                    "product_data": {
+#                        "name": f"Аренда {booking.car.model} {booking.date_from}–{booking.date_to}",
+#                    },
+#                    "unit_amount": int(booking.total_price * 100),
+#                },
+#                "quantity": 1,
+#            }],
+#            after_completion={"type": "redirect", "redirect": {"url": "https://myrentcar.rs/thankyou"}},
+#        )
+#        return payment_link.url
+#    except Exception as e:
+#        print(f"Stripe error: {e}")
+#        return None
 
 
 def create_freekassa_payment_link(booking: Booking, payment_id: int):
@@ -110,11 +110,11 @@ def handle_payment_choice(db, booking_id: int, method: PaymentMethod):
             "description": f"Отсканируйте QR-код для оплаты аренды {booking.car.model} с {booking.date_from} по {booking.date_to}."
         }
 
-    elif method == PaymentMethod.STRIPE:
-        url = create_stripe_payment_link(booking)
-        if not url:
-            raise Exception("Не удалось создать ссылку Stripe")
-        return {"type": "link", "url": url}
+    #elif method == PaymentMethod.STRIPE:
+    #    url = create_stripe_payment_link(booking)
+    #    if not url:
+    #        raise Exception("Не удалось создать ссылку Stripe")
+    #    return {"type": "link", "url": url}
 
     elif method == PaymentMethod.FREKASSA:
         url = create_freekassa_payment_link(booking, payment.id)

@@ -1,4 +1,6 @@
 ﻿import logging
+import asyncio
+
 from aiogram import Bot, Dispatcher
 from aiogram.types import ParseMode
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -6,8 +8,12 @@ from config import BOT_TOKEN
 from database import Base, engine
 from handlers import registration, cars, bookings, contracts, payments, reviews, calculator
 from loguru import logger
-import asyncio
 
+from fastapi import FastAPI
+from api.webhook import app as webhook_app  # <-- ВАЖНО! импортируешь своё FastAPI приложение
+import uvicorn
+
+# Создаём таблицы (один раз)
 print("Creating tables...")
 Base.metadata.create_all(bind=engine)
 
@@ -18,22 +24,36 @@ async def main():
         logger.error("BOT_TOKEN is not set! Please set it in config.py or environment variables.")
         return
 
-    # Инициализация бота и диспетчера с in-memory storage для состояний
+    # Создаём бота и диспетчер
     bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
     storage = MemoryStorage()
     dp = Dispatcher(bot, storage=storage)
 
-    # Регистрируем хендлеры, передавая Dispatcher
+    # Регистрируем все хендлеры
     registration.register_registration_handlers(dp)
     cars.register_cars_handlers(dp)
     bookings.register_bookings_handlers(dp)
     contracts.register_contracts_handlers(dp)
-    payments.register_payments_handlers(dp)   # вот тут твои payments
-    reviews.register_reviews_handlers(dp)      # и reviews
+    payments.register_payments_handlers(dp)
+    reviews.register_reviews_handlers(dp)
 
-    logger.info("Bot started")
+    # Создаём основное FastAPI приложение
+    fastapi_app = FastAPI()
 
-    # Запускаем поллинг
+    # Монтируем наше приложение вебхуков под префиксом /api
+    fastapi_app.mount("/api", webhook_app)
+
+    # Запускаем FastAPI сервер асинхронно
+    config = uvicorn.Config(fastapi_app, host="0.0.0.0", port=8000, log_level="info")
+    server = uvicorn.Server(config)
+
+    # Запускаем вебсервер в фоне
+    loop = asyncio.get_running_loop()
+    loop.create_task(server.serve())
+
+    logger.info("Bot started with FastAPI webhook server on port 8000")
+
+    # Запускаем Telegram polling
     await dp.start_polling()
 
 if __name__ == "__main__":
