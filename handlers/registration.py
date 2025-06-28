@@ -59,6 +59,7 @@ async def get_name_handler(message: types.Message, state: FSMContext):
 
 # Обработка ввода телефона
 async def get_phone_handler(message: types.Message, state: FSMContext):
+    global db
     data = await state.get_data()
     user_type_enum = data.get('user_type_enum')
     await state.update_data(phone=message.text)
@@ -110,6 +111,7 @@ async def get_inn_handler(message: types.Message, state: FSMContext):
 
 # Обработка ввода контактного лица компании
 async def get_contact_person_handler(message: types.Message, state: FSMContext):
+    global db
     data = await state.get_data()
     await state.update_data(contact_person=message.text)
 

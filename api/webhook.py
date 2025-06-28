@@ -31,7 +31,7 @@ async def freekassa_webhook(request: Request):
         if not payment:
             return Response(content="payment not found", status_code=404)
 
-        payment.status = PaymentStatus.PAID  # или нужный статус
+        payment.status = PaymentStatus.PENDING  # или нужный статус
         db.commit()
     finally:
         db.close()

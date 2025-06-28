@@ -4,6 +4,7 @@ def calculate_rental_price(date_from: datetime, date_to: datetime, price_per_day
     """
     Рассчитывает стоимость аренды.
 
+    :param price_per_day: 
     :param date_from: дата начала аренды
     :param date_to: дата окончания аренды
     :param daily_rate: цена за день аренды

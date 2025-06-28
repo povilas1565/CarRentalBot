@@ -1,12 +1,12 @@
-﻿import qrcode
-from io import BytesIO
+﻿from io import BytesIO
+
+import qrcode
 import stripe
 import hashlib
 import datetime
 
 from aiogram import types, Dispatcher
 from aiogram.types import InputFile, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.dispatcher.filters import Command
 from aiogram.utils.exceptions import TelegramAPIError
 
 from models.payment import Payment, PaymentStatus, PaymentMethod
