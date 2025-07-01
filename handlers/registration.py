@@ -24,7 +24,7 @@ user_type_keyboard.add("Арендатор")
 # Начало регистрации
 async def start_registration(message: types.Message):
     await message.answer(
-        "Добро пожаловать! Пожалуйста, выберите тип пользователя:",
+        "Добро пожаловать в сервис аренды автомобилей RentCar! Пожалуйста, выберите тип пользователя:",
         reply_markup=user_type_keyboard
     )
     await RegistrationFSM.user_type.set()

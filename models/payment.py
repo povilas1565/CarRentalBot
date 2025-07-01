@@ -8,11 +8,11 @@ class PaymentStatus(enum.Enum):
     PENDING = "pending"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 class PaymentMethod(enum.Enum):
-    STRIPE = "stripe"
-    FREKASSA = "freekassa"
     NBS_QR = "nbs_qr"
+    PAYOP = "payop"
 
 class Payment(Base):
     __tablename__ = "payments"

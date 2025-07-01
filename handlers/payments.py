@@ -1,8 +1,6 @@
 ﻿from io import BytesIO
-
 import qrcode
-import stripe
-import hashlib
+import requests
 import datetime
 
 from aiogram import types, Dispatcher
@@ -13,19 +11,16 @@ from models.payment import Payment, PaymentStatus, PaymentMethod
 from models.booking import Booking, BookingStatus
 from database import SessionLocal
 
-# Инициализация Stripe
-stripe.api_key = "YOUR_STRIPE_SECRET_KEY"
+from loguru import logger
 
-# Freekassa настройки (замени на свои)
-FREEKASSA_MERCHANT_ID = "your_merchant_id"
-FREEKASSA_SECRET_1 = "gq=!Ap[D7)mS3i1"
-FREEKASSA_SECRET_2 = "HdatG]bYxMkJ4IT"
-FREEKASSA_PAY_URL = "https://pay.freekassa.ru/"
-
-# NBS QR данные
-NBS_PRIMALAC = "ROMAN DAVYDOV PR IZNAJMLJIVANJE I LIZING AUTOMOBILA MY RENT CAR NOVI SAD"
-NBS_BROJ_RACUNA = "190-0000000034540-60"
-
+from config import (
+    PAYOP_MERCHANT_ID,
+    PAYOP_API_KEY,
+    PAYOP_API_URL,
+    PUBLIC_URL,
+    NBS_PRIMALAC,
+    NBS_BROJ_RACUNA
+)
 
 def create_payment(db, booking_id: int, method: PaymentMethod):
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
@@ -49,9 +44,7 @@ def generate_nbs_qr(booking: Booking):
     svrha = f"Аренда авто {booking.car.model} {booking.date_from}–{booking.date_to}"
     iznos = f"{booking.total_price:.2f}"
 
-    qr_text = (
-        f"ST01|{NBS_PRIMALAC}|{svrha}|{iznos}|{NBS_BROJ_RACUNA}"
-    )
+    qr_text = f"ST01|{NBS_PRIMALAC}|{svrha}|{iznos}|{NBS_BROJ_RACUNA}"
 
     qr = qrcode.QRCode(version=1, box_size=10, border=4)
     qr.add_data(qr_text)
@@ -64,40 +57,30 @@ def generate_nbs_qr(booking: Booking):
     return bio
 
 
-# def create_stripe_payment_link(booking: Booking):
-#    try:
-#        payment_link = stripe.PaymentLink.create(
-#            line_items=[{
-#                "price_data": {
-#                    "currency": "eur",
-#                    "product_data": {
-#                        "name": f"Аренда {booking.car.model} {booking.date_from}–{booking.date_to}",
-#                    },
-#                    "unit_amount": int(booking.total_price * 100),
-#                },
-#                "quantity": 1,
-#            }],
-#            after_completion={"type": "redirect", "redirect": {"url": "https://myrentcar.rs/thankyou"}},
-#        )
-#        return payment_link.url
-#    except Exception as e:
-#        print(f"Stripe error: {e}")
-#        return None
+def create_payop_payment_link(booking: Booking, payment_id: int):
+    payload = {
+        "merchant_id": PAYOP_MERCHANT_ID,
+        "amount": f"{booking.total_price:.2f}",
+        "currency": "EUR",
+        "order_id": str(payment_id),
+        "description": f"Аренда {booking.car.model} с {booking.date_from} по {booking.date_to}",
+        "callback_url": f"{PUBLIC_URL}/payop_callback",
+        "success_url": f"{PUBLIC_URL}/payment_success",
+        "fail_url": f"{PUBLIC_URL}/payment_fail",
+    }
+    headers = {
+        "Authorization": f"Bearer {PAYOP_API_KEY}",
+        "Content-Type": "application/json",
+    }
 
-
-def create_freekassa_payment_link(booking: Booking, payment_id: int):
-    out_summ = f"{booking.total_price:.2f}"
-    inv_id = str(payment_id)
-    crc_str = f"{FREEKASSA_MERCHANT_ID}:{out_summ}:{inv_id}:{FREEKASSA_SECRET_1}"
-    signature = hashlib.md5(crc_str.encode("utf-8")).hexdigest()
-
-    pay_url = (
-        f"{FREEKASSA_PAY_URL}?m={FREEKASSA_MERCHANT_ID}"
-        f"&oa={out_summ}&o={inv_id}&s={signature}"
-        f"&us_phone=1&us_email=1&us_fio=1&us_address=1"
-    )
-    return pay_url
-
+    response = requests.post(PAYOP_API_URL, json=payload, headers=headers)
+    if response.status_code == 201:
+        data = response.json()
+        pay_url = data.get("payment_url")
+        return pay_url
+    else:
+        logger.error(f"PayOp API error: {response.status_code} {response.text}")
+        raise Exception("Не удалось создать платёж PayOp")
 
 def handle_payment_choice(db, booking_id: int, method: PaymentMethod):
     payment, booking = create_payment(db, booking_id, method)
@@ -110,14 +93,8 @@ def handle_payment_choice(db, booking_id: int, method: PaymentMethod):
             "description": f"Отсканируйте QR-код для оплаты аренды {booking.car.model} с {booking.date_from} по {booking.date_to}."
         }
 
-    #elif method == PaymentMethod.STRIPE:
-    #    url = create_stripe_payment_link(booking)
-    #    if not url:
-    #        raise Exception("Не удалось создать ссылку Stripe")
-    #    return {"type": "link", "url": url}
-
-    elif method == PaymentMethod.FREKASSA:
-        url = create_freekassa_payment_link(booking, payment.id)
+    elif method == PaymentMethod.PAYOP:
+        url = create_payop_payment_link(booking, payment.id)
         return {"type": "link", "url": url}
 
     else:
@@ -140,7 +117,7 @@ async def send_payment_to_user(bot, chat_id: int, payment_result: dict):
         else:
             await bot.send_message(chat_id, "Ошибка: неизвестный формат оплаты.")
     except TelegramAPIError as e:
-        print(f"Telegram API Error: {e}")
+        logger.error(f"Telegram API Error: {e}")
 
 
 # --- Хендлеры с кнопками ---
@@ -149,9 +126,8 @@ async def start_pay_process(message: types.Message):
     user_id = message.from_user.id
     db = SessionLocal()
     try:
-        # Берём все бронирования пользователя, которые можно оплатить
         bookings = db.query(Booking).filter(
-            Booking.renter_id == user_id,
+            Booking.renter.has(telegram_id=user_id),
             Booking.status == BookingStatus.CONFIRMED
         ).all()
 
@@ -165,7 +141,6 @@ async def start_pay_process(message: types.Message):
             keyboard.insert(InlineKeyboardButton(btn_text, callback_data=f"pay_select_booking:{b.id}"))
 
         await message.answer("Выберите бронирование для оплаты:", reply_markup=keyboard)
-
     finally:
         db.close()
 
@@ -174,8 +149,9 @@ async def callback_select_booking(callback: types.CallbackQuery):
     booking_id = int(callback.data.split(":")[1])
     keyboard = InlineKeyboardMarkup(row_width=1)
 
-    for method in PaymentMethod:
-        keyboard.insert(InlineKeyboardButton(method.value.upper(), callback_data=f"pay_select_method:{booking_id}:{method.value}"))
+    # Показываем только актуальные методы оплаты
+    keyboard.insert(InlineKeyboardButton("NBS QR", callback_data=f"pay_select_method:{booking_id}:nbs_qr"))
+    keyboard.insert(InlineKeyboardButton("PayOp", callback_data=f"pay_select_method:{booking_id}:payop"))
 
     await callback.message.edit_text("Выберите метод оплаты:", reply_markup=keyboard)
     await callback.answer()
@@ -201,7 +177,34 @@ async def callback_select_method(callback: types.CallbackQuery):
     await callback.answer("Платеж создан!")
 
 
+async def pay_cancel_handler(message: types.Message):
+    db = SessionLocal()
+    try:
+        user_id = message.from_user.id
+        booking = (
+            db.query(Booking)
+            .filter(Booking.renter.has(telegram_id=user_id))
+            .filter(Booking.status == BookingStatus.PENDING)
+            .order_by(Booking.date_from.desc())
+            .first()
+        )
+        if not booking:
+            await message.answer("Нет активных оплат для отмены.")
+            return
+
+        booking.status = BookingStatus.CANCELLED
+        db.commit()
+        await message.answer(f"Оплата бронирования #{booking.id} отменена.")
+        logger.info(f"User {user_id} cancelled payment for booking {booking.id}")
+    except Exception as e:
+        logger.error(f"Ошибка отмены оплаты: {e}")
+        await message.answer("Ошибка при отмене оплаты. Попробуйте позже.")
+    finally:
+        db.close()
+
+
 def register_payments_handlers(dp: Dispatcher):
     dp.register_message_handler(start_pay_process, commands=["pay"])
     dp.register_callback_query_handler(callback_select_booking, lambda c: c.data and c.data.startswith("pay_select_booking:"))
     dp.register_callback_query_handler(callback_select_method, lambda c: c.data and c.data.startswith("pay_select_method:"))
+    dp.register_message_handler(pay_cancel_handler, commands=["pay_cancel"])

@@ -6,11 +6,11 @@ from aiogram.types import ParseMode
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from config import BOT_TOKEN
 from database import Base, engine
-from handlers import registration, cars, bookings, contracts, payments, reviews, calculator
+from handlers import registration, cars, bookings, contracts, payments, reviews, calculator, menu
 from loguru import logger
 
 from fastapi import FastAPI
-from api.webhook import app as webhook_app  # <-- ВАЖНО! импортируешь своё FastAPI приложение
+from api.webhook import router as payop_router
 import uvicorn
 
 # Создаём таблицы (один раз)
@@ -36,12 +36,12 @@ async def main():
     contracts.register_contracts_handlers(dp)
     payments.register_payments_handlers(dp)
     reviews.register_reviews_handlers(dp)
+    menu.register_menu_handlers(dp)  # <-- регистрируем меню
 
-    # Создаём основное FastAPI приложение
     fastapi_app = FastAPI()
 
-    # Монтируем наше приложение вебхуков под префиксом /api
-    fastapi_app.mount("/api", webhook_app)
+    # Монтируем вебхук роутер
+    fastapi_app.include_router(payop_router, prefix="/webhook")
 
     # Запускаем FastAPI сервер асинхронно
     config = uvicorn.Config(fastapi_app, host="0.0.0.0", port=8000, log_level="info")
