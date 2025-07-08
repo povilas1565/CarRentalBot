@@ -1,6 +1,5 @@
 ﻿from io import BytesIO
 import qrcode
-import requests
 import datetime
 
 from aiogram import types, Dispatcher
@@ -14,13 +13,12 @@ from database import SessionLocal
 from loguru import logger
 
 from config import (
-    PAYOP_MERCHANT_ID,
-    PAYOP_API_KEY,
-    PAYOP_API_URL,
-    PUBLIC_URL,
+    FREEKASSA_MERCHANT_ID,
+    FREEKASSA_SECRET_1,
     NBS_PRIMALAC,
     NBS_BROJ_RACUNA
 )
+import hashlib
 
 def create_payment(db, booking_id: int, method: PaymentMethod):
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
@@ -57,31 +55,23 @@ def generate_nbs_qr(booking: Booking):
     return bio
 
 
-def create_payop_payment_link(booking: Booking, payment_id: int):
-    payload = {
-        "merchant_id": PAYOP_MERCHANT_ID,
-        "amount": f"{booking.total_price:.2f}",
-        "currency": "EUR",
-        "order_id": str(payment_id),
-        "description": f"Аренда {booking.car.model} с {booking.date_from} по {booking.date_to}",
-        "callback_url": f"{PUBLIC_URL}/payop_callback",
-        "success_url": f"{PUBLIC_URL}/payment_success",
-        "fail_url": f"{PUBLIC_URL}/payment_fail",
-    }
-    headers = {
-        "Authorization": f"Bearer {PAYOP_API_KEY}",
-        "Content-Type": "application/json",
-    }
+def create_freekassa_payment_link(booking: Booking, payment_id: int):
+    amount = f"{booking.total_price:.2f}"
+    currency = "EUR"
+    order_id = str(payment_id)
 
-    response = requests.post(PAYOP_API_URL, json=payload, headers=headers)
-    if response.status_code == 201:
-        data = response.json()
-        pay_url = data.get("payment_url")
-        return pay_url
-    else:
-        logger.error(f"PayOp API error: {response.status_code} {response.text}")
-        raise Exception("Не удалось создать платёж PayOp")
+    sign_str = f"{FREEKASSA_MERCHANT_ID}:{amount}:{FREEKASSA_SECRET_1}:{currency}:{order_id}"
+    sign = hashlib.md5(sign_str.encode()).hexdigest()
 
+    url = (
+        f"https://pay.freekassa.ru/"
+        f"?m={FREEKASSA_MERCHANT_ID}"
+        f"&oa={amount}"
+        f"&currency={currency}"
+        f"&o={order_id}"
+        f"&s={sign}"
+    )
+    return url
 def handle_payment_choice(db, booking_id: int, method: PaymentMethod):
     payment, booking = create_payment(db, booking_id, method)
 
@@ -93,8 +83,8 @@ def handle_payment_choice(db, booking_id: int, method: PaymentMethod):
             "description": f"Отсканируйте QR-код для оплаты аренды {booking.car.model} с {booking.date_from} по {booking.date_to}."
         }
 
-    elif method == PaymentMethod.PAYOP:
-        url = create_payop_payment_link(booking, payment.id)
+    elif method == PaymentMethod.FREEKASSA:
+        url = create_freekassa_payment_link(booking, payment.id)
         return {"type": "link", "url": url}
 
     else:
@@ -150,8 +140,8 @@ async def callback_select_booking(callback: types.CallbackQuery):
     keyboard = InlineKeyboardMarkup(row_width=1)
 
     # Показываем только актуальные методы оплаты
+    keyboard.insert(InlineKeyboardButton("FreeKassa", callback_data=f"pay_select_method:{booking_id}:freekassa"))
     keyboard.insert(InlineKeyboardButton("NBS QR", callback_data=f"pay_select_method:{booking_id}:nbs_qr"))
-    keyboard.insert(InlineKeyboardButton("PayOp", callback_data=f"pay_select_method:{booking_id}:payop"))
 
     await callback.message.edit_text("Выберите метод оплаты:", reply_markup=keyboard)
     await callback.answer()

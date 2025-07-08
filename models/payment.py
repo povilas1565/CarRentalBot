@@ -12,7 +12,7 @@ class PaymentStatus(enum.Enum):
 
 class PaymentMethod(enum.Enum):
     NBS_QR = "nbs_qr"
-    PAYOP = "payop"
+    FREEKASSA = "freekassa"
 
 class Payment(Base):
     __tablename__ = "payments"

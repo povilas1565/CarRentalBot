@@ -10,7 +10,7 @@ from handlers import registration, cars, bookings, contracts, payments, reviews,
 from loguru import logger
 
 from fastapi import FastAPI
-from api.webhook import router as payop_router
+from api.webhook import app as webhook_app
 import uvicorn
 
 # Создаём таблицы (один раз)
@@ -41,7 +41,7 @@ async def main():
     fastapi_app = FastAPI()
 
     # Монтируем вебхук роутер
-    fastapi_app.include_router(payop_router, prefix="/webhook")
+    fastapi_app.mount("/api", webhook_app)
 
     # Запускаем FastAPI сервер асинхронно
     config = uvicorn.Config(fastapi_app, host="0.0.0.0", port=8000, log_level="info")
