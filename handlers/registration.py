@@ -5,6 +5,7 @@ from aiogram.types import ReplyKeyboardMarkup, ReplyKeyboardRemove
 from database import SessionLocal
 from models.user import User, UserType
 from loguru import logger
+from handlers.menu import main_menu_kb
 
 # --- STATES ---
 class RegistrationFSM(StatesGroup):
@@ -89,6 +90,7 @@ async def get_phone_handler(message: types.Message, state: FSMContext):
                 user.registered = True
             db.commit()
             await message.answer("Регистрация завершена. Спасибо!", reply_markup=ReplyKeyboardRemove())
+            await message.answer("Главное меню:", reply_markup=main_menu_kb())
             logger.info(f"User registered: {telegram_id}, type: {user.user_type}")
         except Exception as e:
             logger.error(f"Error saving user: {e}")
@@ -140,6 +142,7 @@ async def get_contact_person_handler(message: types.Message, state: FSMContext):
             user.registered = True
         db.commit()
         await message.answer("Регистрация завершена. Спасибо!", reply_markup=ReplyKeyboardRemove())
+        await message.answer("Главное меню:", reply_markup=main_menu_kb())
         logger.info(f"Legal entity registered: {telegram_id}")
     except Exception as e:
         logger.error(f"Error saving legal user: {e}")

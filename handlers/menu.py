@@ -136,6 +136,11 @@ async def process_payment_cancellation(callback: types.CallbackQuery):
     await callback.message.answer("Оплата успешно отменена.")
     await callback.answer()
 
+async def menu_command(message: types.Message):
+    await message.answer("Главное меню:", reply_markup=main_menu_kb())
+
+
 def register_menu_handlers(dp: Dispatcher):
+    dp.register_message_handler(menu_command, commands=["menu"], state="*")
     dp.register_callback_query_handler(process_menu_callbacks, state="*")
     dp.register_callback_query_handler(confirmation_handler, state=MenuFSM.waiting_for_confirmation)
