@@ -127,7 +127,6 @@ async def confirmation_handler(callback: types.CallbackQuery, state: FSMContext)
         await callback.answer()
 
 async def process_payment(callback: types.CallbackQuery):
-    # Твоя логика оплаты, API платежей и т.п.
     await callback.message.answer("Оплата успешно проведена! Спасибо.")
     await callback.answer()
 

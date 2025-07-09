@@ -13,7 +13,6 @@ from fastapi import FastAPI
 from api.webhook import app as webhook_app
 import uvicorn
 
-# Создаём таблицы (один раз)
 print("Creating tables...")
 Base.metadata.create_all(bind=engine)
 
@@ -36,7 +35,7 @@ async def main():
     contracts.register_contracts_handlers(dp)
     payments.register_payments_handlers(dp)
     reviews.register_reviews_handlers(dp)
-    menu.register_menu_handlers(dp)  # <-- регистрируем меню
+    menu.register_menu_handlers(dp) 
 
     fastapi_app = FastAPI()
 
