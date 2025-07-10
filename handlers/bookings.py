@@ -1,8 +1,7 @@
 ﻿from aiogram import types, Dispatcher
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import StatesGroup, State
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from aiogram.dispatcher.filters import Text
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models.booking import Booking, BookingStatus
@@ -14,40 +13,59 @@ from loguru import logger
 
 
 # --- STATES ---
-
 class BookingFSM(StatesGroup):
+    select_city = State()
     select_car = State()
     select_date_from = State()
     select_date_to = State()
     confirm_booking = State()
 
-# start_booking — запускает диалог
+
+# --- START BOOKING: выбор города ---
 async def start_booking(msg: types.Message, state: FSMContext):
-    db: Session = SessionLocal()
+    cities = ["Москва", "Санкт-Петербург", "Казань"]  # <-- список городов можно подтягивать из базы или константа
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    for city in cities:
+        keyboard.insert(InlineKeyboardButton(text=city, callback_data=f"city:{city}"))
+
+    await msg.answer("Выберите город для аренды автомобиля:", reply_markup=keyboard)
+    await BookingFSM.select_city.set()
+
+
+# --- HANDLER ВЫБОРА ГОРОДА ---
+async def select_city_handler(callback: types.CallbackQuery, state: FSMContext):
+    city = callback.data.split(":")[1]
+    await state.update_data(city=city)
+    db = SessionLocal()
     try:
-        user = db.query(User).filter(User.telegram_id == msg.from_user.id).first()
-        if not user:
-            await msg.answer("Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации.")
-            return
-
-        cars = db.query(Car).filter(Car.available == True).all()
+        cars = db.query(Car).filter(Car.available == True, Car.city == city).all()
         if not cars:
-            await msg.answer("Нет доступных автомобилей для бронирования.")
+            await callback.message.answer("В выбранном городе нет доступных автомобилей.")
+            await state.finish()
+            await callback.answer()
             return
 
-        keyboard = [[KeyboardButton(f"{car.brand} {car.model} ({car.year})")] for car in cars]
+        # Формируем клавиатуру с машинами (текст + id)
+        keyboard = []
+        cars_map = {}
+        for car in cars:
+            car_name = f"{car.brand} {car.model} ({car.year})"
+            keyboard.append([KeyboardButton(car_name)])
+            cars_map[car_name] = car.id
+
         keyboard.append([KeyboardButton("Отмена")])
         markup = ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True, one_time_keyboard=True)
 
-        cars_map = {f"{car.brand} {car.model} ({car.year})": car.id for car in cars}
         await state.update_data(available_cars=cars_map)
 
-        await msg.answer("Выберите автомобиль для бронирования:", reply_markup=markup)
-        await state.set_state(BookingFSM.select_car)
+        await callback.message.answer("Выберите автомобиль для бронирования:", reply_markup=markup)
+        await BookingFSM.select_car.set()
+        await callback.answer()
     finally:
         db.close()
 
-# select_car
+
+# --- SELECT CAR: выбор машины из клавиатуры, показ фото ---
 async def select_car(msg: types.Message, state: FSMContext):
     if msg.text == "Отмена":
         await msg.answer("Бронирование отменено.", reply_markup=ReplyKeyboardRemove())
@@ -61,11 +79,29 @@ async def select_car(msg: types.Message, state: FSMContext):
         await msg.answer("Пожалуйста, выберите автомобиль из списка.")
         return
 
-    await state.update_data(selected_car_id=cars_map[msg.text])
-    await msg.answer("Введите дату начала бронирования в формате ДД.ММ.ГГГГ:", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(BookingFSM.select_date_from)
+    car_id = cars_map[msg.text]
+    await state.update_data(selected_car_id=car_id)
 
-# select_date_from
+    db = SessionLocal()
+    try:
+        car = db.query(Car).filter(Car.id == car_id).first()
+        if not car:
+            await msg.answer("Автомобиль не найден.")
+            await state.finish()
+            return
+
+        # Если есть фото, отправляем
+        if car.photo_file_id:
+            await msg.answer_photo(photo=car.photo_file_id, caption=msg.text)
+
+    finally:
+        db.close()
+
+    await msg.answer("Введите дату начала бронирования в формате ДД.MM.ГГГГ:", reply_markup=ReplyKeyboardRemove())
+    await BookingFSM.select_date_from.set()
+
+
+# --- SELECT DATE FROM ---
 async def select_date_from(msg: types.Message, state: FSMContext):
     date_text = msg.text.strip()
     try:
@@ -73,14 +109,15 @@ async def select_date_from(msg: types.Message, state: FSMContext):
         if date_from < datetime.today().date():
             raise ValueError("Дата начала не может быть в прошлом.")
     except Exception:
-        await msg.answer("Введите корректную дату начала в формате ДД.ММ.ГГГГ, не в прошлом.")
+        await msg.answer("Введите корректную дату начала в формате ДД.MM.ГГГГ, не в прошлом.")
         return
 
     await state.update_data(date_from=date_from)
-    await msg.answer("Введите дату окончания бронирования в формате ДД.ММ.ГГГГ:")
-    await state.set_state(BookingFSM.select_date_to)
+    await msg.answer("Введите дату окончания бронирования в формате ДД.MM.ГГГГ:")
+    await BookingFSM.select_date_to.set()
 
-# select_date_to
+
+# --- SELECT DATE TO ---
 async def select_date_to(msg: types.Message, state: FSMContext):
     date_text = msg.text.strip()
     data = await state.get_data()
@@ -91,7 +128,7 @@ async def select_date_to(msg: types.Message, state: FSMContext):
             await msg.answer("Дата окончания не может быть раньше даты начала.")
             return
     except Exception:
-        await msg.answer("Введите корректную дату окончания в формате ДД.ММ.ГГГГ.")
+        await msg.answer("Введите корректную дату окончания в формате ДД.MM.ГГГГ.")
         return
 
     await state.update_data(date_to=date_to)
@@ -105,34 +142,35 @@ async def select_date_to(msg: types.Message, state: FSMContext):
             await state.finish()
             return
 
-        try:
-            discount = car.discount if car.discount else 0.0
+        discount = car.discount if car.discount else 0.0
 
-            total_price = calculate_rental_price(
+        total_price = calculate_rental_price(
             date_from=datetime.combine(date_from, datetime.min.time()),
             date_to=datetime.combine(date_to, datetime.min.time()),
             price_per_day=car.price_per_day,
             discount=discount
         )
-        except ValueError as e:
-            await msg.answer(str(e))
-            return
 
         await state.update_data(total_price=total_price)
 
+        # Получаем название машины для вывода
+        cars_map = data.get("available_cars")
+        car_name = next((name for name, id_ in cars_map.items() if id_ == car_id), "автомобиль")
+
         summary = (
             f"Подтвердите бронирование:\n"
-            f"Автомобиль: {list(data['available_cars'].keys())[list(data['available_cars'].values()).index(car_id)]}\n"
+            f"Автомобиль: {car_name}\n"
             f"С {date_from.strftime('%d.%m.%Y')} по {date_to.strftime('%d.%m.%Y')}\n"
             f"Итого: {total_price:.2f} €\n\n"
             "Подтверждаете? (да/нет)"
         )
         await msg.answer(summary)
-        await state.set_state(BookingFSM.confirm_booking)
+        await BookingFSM.confirm_booking.set()
     finally:
         db.close()
 
-# confirm_booking
+
+# --- CONFIRM BOOKING ---
 async def confirm_booking(msg: types.Message, state: FSMContext):
     text = msg.text.lower()
     if text not in ["да", "нет"]:
@@ -181,21 +219,19 @@ async def confirm_booking(msg: types.Message, state: FSMContext):
 
     await state.finish()
 
-# cancel handler
+
+# --- CANCEL ---
 async def cancel(msg: types.Message, state: FSMContext):
     await msg.answer("Операция отменена.", reply_markup=ReplyKeyboardRemove())
     await state.finish()
 
-# Регистрация хендлеров
-def register_bookings_handlers(dp: Dispatcher):
 
+# --- REGISTER HANDLERS ---
+def register_bookings_handlers(dp: Dispatcher):
     dp.register_message_handler(start_booking, commands=["book"], state="*")
     dp.register_message_handler(cancel, commands=["cancel"], state="*")
+    dp.register_callback_query_handler(select_city_handler, lambda c: c.data.startswith("city:"), state=BookingFSM.select_city)
     dp.register_message_handler(select_car, state=BookingFSM.select_car)
     dp.register_message_handler(select_date_from, state=BookingFSM.select_date_from)
     dp.register_message_handler(select_date_to, state=BookingFSM.select_date_to)
-    dp.register_message_handler(
-        confirm_booking,
-        lambda msg: msg.text.lower() in ["да", "нет"],  # ← исправлено
-        state=BookingFSM.confirm_booking
-    )
+    dp.register_message_handler(confirm_booking, lambda msg: msg.text.lower() in ["да", "нет"], state=BookingFSM.confirm_booking)

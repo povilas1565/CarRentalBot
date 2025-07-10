@@ -13,6 +13,8 @@ class Car(Base):
     license_plate = Column(String, nullable=True)
     vin = Column(String, nullable=True)
     price_per_day = Column(Float, nullable=False)
+    city = Column(String, nullable=False)  
+    photo_file_id = Column(String, nullable=True)  
     rental_terms = Column(String, nullable=True)
     available = Column(Boolean, default=True)
     discount = Column(Float, default=0.0) 

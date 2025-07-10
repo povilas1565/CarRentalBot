@@ -17,8 +17,10 @@ class AddCarFSM(StatesGroup):
     license_plate = State()
     vin = State()
     price = State()
-    discount = State()          # новое состояние для скидки
+    discount = State()
     rental_terms = State()
+    city = State()         # <-- добавляем сюда
+    photo = State()        # <-- и сюда
     confirm = State()
 
 
@@ -95,12 +97,33 @@ async def get_discount(msg: types.Message, state: FSMContext):
     except ValueError:
         await msg.answer("Введите корректное число от 0 до 100.")
 
-
 async def get_terms(msg: types.Message, state: FSMContext):
     terms = "" if msg.text.lower() == "нет" else msg.text
     await state.update_data(rental_terms=terms)
 
+    await msg.answer("Введите город автомобиля:")
+    await AddCarFSM.city.set()
+
+
+async def get_city(msg: types.Message, state: FSMContext):
+    city = msg.text.strip()
+    await state.update_data(city=city)
+    await msg.answer("Отправьте фото автомобиля или напишите 'пропустить':")
+    await AddCarFSM.photo.set()
+
+
+async def get_photo(msg: types.Message, state: FSMContext):
+    if msg.photo:
+        photo_file_id = msg.photo[-1].file_id  # берем файл с максимальным разрешением
+        await state.update_data(photo_file_id=photo_file_id)
+    elif msg.text.lower() == "пропустить":
+        await state.update_data(photo_file_id=None)
+    else:
+        await msg.answer("Пожалуйста, отправьте фото или напишите 'пропустить'.")
+        return  # ждем повторного ввода
+
     data = await state.get_data()
+    
     summary = (
         f"Проверьте данные:\n"
         f"Марка: {data['brand']}\n"
@@ -110,7 +133,9 @@ async def get_terms(msg: types.Message, state: FSMContext):
         f"VIN: {data['vin']}\n"
         f"Цена: {data['price_per_day']} €\n"
         f"Скидка: {data.get('discount', 0)} %\n"
-        f"Условия: {terms or 'нет'}\n\n"
+        f"Условия: {data['rental_terms'] or 'нет'}\n"
+        f"Город: {data['city']}\n"
+        f"Фото: {'есть' if data.get('photo_file_id') else 'нет'}\n\n"
         f"Подтвердите добавление? (да/нет)"
     )
     await msg.answer(summary)
@@ -118,16 +143,11 @@ async def get_terms(msg: types.Message, state: FSMContext):
 
 
 async def confirm_car(msg: types.Message, state: FSMContext):
-    text = msg.text.lower()
-    if text == "да":
+    if msg.text.lower() == "да":
+        data = await state.get_data()
+        user = msg.from_user
         db: Session = SessionLocal()
         try:
-            user = db.query(User).filter(User.telegram_id == msg.from_user.id).first()
-            if not user:
-                await msg.answer("Сначала зарегистрируйтесь (/start).")
-                return await state.finish()
-
-            data = await state.get_data()
             car = Car(
                 owner_id=user.id,
                 brand=data["brand"],
@@ -138,22 +158,22 @@ async def confirm_car(msg: types.Message, state: FSMContext):
                 price_per_day=data["price_per_day"],
                 discount=data.get("discount", 0.0),
                 rental_terms=data["rental_terms"],
-                available=True
+                city=data.get("city"),
+                photo_file_id=data.get("photo_file_id"),
+                available=True,
             )
             db.add(car)
             db.commit()
-            await msg.answer("Автомобиль успешно добавлен!")
+            await msg.answer("Автомобиль успешно добавлен.")
         except Exception as e:
-            logger.error(f"Ошибка добавления машины: {e}")
-            await msg.answer("Произошла ошибка. Попробуйте позже.")
+            logger.error(f"Ошибка добавления автомобиля: {e}")
+            await msg.answer("Произошла ошибка при добавлении автомобиля.")
         finally:
             db.close()
-        await state.finish()
-    elif text == "нет":
-        await msg.answer("Добавление отменено.")
-        await state.finish()
     else:
-        await msg.answer("Пожалуйста, введите 'да' или 'нет'.")
+        await msg.answer("Добавление отменено.")
+
+    await state.finish()
 
 
 # --- MY CARS HANDLERS ---
@@ -187,33 +207,35 @@ async def list_user_cars(msg: types.Message, state: FSMContext):
     finally:
         db.close()
 
+async def edit_car_start(msg: types.Message, state: FSMContext):
+    # Для примера — просто запрашиваем id авто
+    await msg.answer("Введите ID автомобиля для редактирования:")
+    await EditCarFSM.choose_field.set()
 
 async def choose_edit_field(msg: types.Message, state: FSMContext):
-    if msg.text == "Отмена":
-        await msg.answer("Операция отменена.", reply_markup=ReplyKeyboardRemove())
-        return await state.finish()
-
-    data = await state.get_data()
-    car_id = data.get("car_map", {}).get(msg.text)
-    if not car_id:
-        await msg.answer("Пожалуйста, выберите автомобиль из списка.")
+    car_id = msg.text.strip()
+    # Проверим, что такой авто есть
+    db: Session = SessionLocal()
+    car = db.query(Car).filter(Car.id == car_id).first()
+    db.close()
+    if not car:
+        await msg.answer("Автомобиль не найден. Попробуйте другой ID.")
         return
 
     await state.update_data(edit_car_id=car_id)
 
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Марка"), KeyboardButton(text="Модель")],
-            [KeyboardButton(text="Год"), KeyboardButton(text="Цена")],
-            [KeyboardButton(text="Скидка"), KeyboardButton(text="Условия")],
-            [KeyboardButton(text="Удалить")],
-            [KeyboardButton(text="Отмена")]
+            [KeyboardButton("Марка"), KeyboardButton("Модель")],
+            [KeyboardButton("Год"), KeyboardButton("Цена")],
+            [KeyboardButton("Скидка"), KeyboardButton("Условия")],
+            [KeyboardButton("Город"), KeyboardButton("Фото")],
+            [KeyboardButton("Отмена")]
         ],
         resize_keyboard=True
     )
-    await msg.answer("Что вы хотите изменить?", reply_markup=keyboard)
-    await EditCarFSM.choose_field.set()
-
+    await msg.answer("Выберите поле для редактирования:", reply_markup=keyboard)
+    await EditCarFSM.enter_value.set()
 
 async def get_new_value(msg: types.Message, state: FSMContext):
     if msg.text == "Удалить":
@@ -222,10 +244,14 @@ async def get_new_value(msg: types.Message, state: FSMContext):
     elif msg.text == "Отмена":
         await msg.answer("Операция отменена.", reply_markup=ReplyKeyboardRemove())
         return await state.finish()
-    elif msg.text in ["Марка", "Модель", "Год", "Цена", "Скидка", "Условия"]:
+    elif msg.text in ["Марка", "Модель", "Год", "Цена", "Скидка", "Условия", "Город"]:
         await state.update_data(edit_field=msg.text)
         await msg.answer(f"Введите новое значение для {msg.text}:", reply_markup=ReplyKeyboardRemove())
         await EditCarFSM.enter_value.set()
+    elif msg.text == "Фото":
+        await msg.answer("Отправьте новое фото автомобиля или напишите 'пропустить':", reply_markup=ReplyKeyboardRemove())
+        await EditCarFSM.enter_value.set()
+        await state.update_data(edit_field="Фото", waiting_for_photo=True)
     else:
         await msg.answer("Выберите вариант из меню.")
 
@@ -233,15 +259,36 @@ async def get_new_value(msg: types.Message, state: FSMContext):
 async def update_car_value(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     car_id = data.get("edit_car_id")
+
+    if msg.text == "Отмена":
+        await msg.answer("Редактирование отменено.", reply_markup=ReplyKeyboardRemove())
+        return await state.finish()
+
+    # Если мы уже знаем, какое поле редактируем
+    if "edit_field" not in data:
+        # Пользователь выбрал поле для редактирования
+        field = msg.text
+        await state.update_data(edit_field=field)
+        if field == "Фото":
+            await msg.answer("Отправьте новое фото автомобиля или напишите 'пропустить':", reply_markup=ReplyKeyboardRemove())
+            await state.update_data(waiting_for_photo=True)
+        else:
+            await msg.answer(f"Введите новое значение для {field}:", reply_markup=ReplyKeyboardRemove())
+        return
+
+    # Обработка нового значения для поля
     field = data.get("edit_field")
+    waiting_for_photo = data.get("waiting_for_photo", False)
 
     db: Session = SessionLocal()
-    try:
-        car = db.query(Car).filter(Car.id == car_id).first()
-        if not car:
-            await msg.answer("Автомобиль не найден.")
-            return await state.finish()
+    car = db.query(Car).filter(Car.id == car_id).first()
 
+    if not car:
+        await msg.answer("Автомобиль не найден.")
+        await state.finish()
+        return
+
+    try:
         if field == "Марка":
             car.brand = msg.text
         elif field == "Модель":
@@ -273,14 +320,33 @@ async def update_car_value(msg: types.Message, state: FSMContext):
                 return
         elif field == "Условия":
             car.rental_terms = msg.text
+        elif field == "Город":
+            car.city = msg.text
+        elif field == "Фото":
+            if waiting_for_photo:
+                if msg.photo:
+                    car.photo_file_id = msg.photo[-1].file_id
+                elif msg.text.lower() == "пропустить":
+                    pass  # не меняем фото
+                else:
+                    await msg.answer("Пожалуйста, отправьте фото или напишите 'пропустить'.")
+                    return
+            else:
+                await msg.answer("Пожалуйста, отправьте фото или напишите 'пропустить'.")
+                return
+        else:
+            await msg.answer("Неизвестное поле.")
+            await state.finish()
+            return
 
         db.commit()
-        await msg.answer(f"Поле '{field}' обновлено успешно.")
+        await msg.answer(f"Поле '{field}' успешно обновлено.", reply_markup=ReplyKeyboardRemove())
     except Exception as e:
-        logger.error(f"Ошибка при обновлении: {e}")
-        await msg.answer("Ошибка при обновлении. Проверьте данные.")
+        logger.error(f"Ошибка обновления автомобиля: {e}")
+        await msg.answer("Ошибка при обновлении данных.")
     finally:
         db.close()
+
     await state.finish()
 
 
@@ -319,10 +385,12 @@ def register_cars_handlers(dp: Dispatcher):
     dp.register_message_handler(get_price, state=AddCarFSM.price)
     dp.register_message_handler(get_discount, state=AddCarFSM.discount)  # новый обработчик скидки
     dp.register_message_handler(get_terms, state=AddCarFSM.rental_terms)
+    dp.register_message_handler(get_city, state=AddCarFSM.city)
+    dp.register_message_handler(get_photo, content_types=types.ContentTypes.ANY, state=AddCarFSM.photo)
     dp.register_message_handler(confirm_car, state=AddCarFSM.confirm)
 
     dp.register_message_handler(list_user_cars, commands=["my_cars"], state="*")
     dp.register_message_handler(choose_edit_field, state=EditCarFSM.choose_car)
     dp.register_message_handler(get_new_value, state=EditCarFSM.choose_field)
-    dp.register_message_handler(update_car_value, state=EditCarFSM.enter_value)
+    dp.register_message_handler(update_car_value, content_types=types.ContentTypes.ANY, state=EditCarFSM.enter_value)
     dp.register_message_handler(delete_car, state=EditCarFSM.confirm_delete)
