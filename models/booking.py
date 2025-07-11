@@ -1,10 +1,14 @@
 ﻿from datetime import datetime
+from tkinter.tix import COLUMN
 
 from pydantic_core.core_schema import nullable_schema
 from sqlalchemy import Column, Integer, ForeignKey, Date, Enum, Float, Boolean, DateTime
 from database import Base
 from sqlalchemy.orm import relationship
 import enum
+
+from models.payment import PaymentStatus
+
 
 class BookingStatus(enum.Enum):
     PENDING = "pending"

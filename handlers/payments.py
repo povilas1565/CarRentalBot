@@ -1,24 +1,27 @@
 ﻿from io import BytesIO
 import qrcode
 import datetime
+import hashlib
 
 from aiogram import types, Dispatcher
-from aiogram.types import InputFile, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils.exceptions import TelegramAPIError
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 
+from keyboards.inline import payment_confirmation_kb
 from models.payment import Payment, PaymentStatus, PaymentMethod
 from models.booking import Booking, BookingStatus
+from models.user import User
 from database import SessionLocal
 
-from loguru import logger
+from config import FREEKASSA_MERCHANT_ID, FREEKASSA_SECRET_1, NBS_PRIMALAC, NBS_BROJ_RACUNA
+from handlers.menu import main_menu_kb
 
-from config import (
-    FREEKASSA_MERCHANT_ID,
-    FREEKASSA_SECRET_1,
-    NBS_PRIMALAC,
-    NBS_BROJ_RACUNA
-)
-import hashlib
+
+class PaymentStates(StatesGroup):
+    waiting_for_booking = State()
+    waiting_for_method = State()
+
 
 def create_payment(db, booking_id: int, method: PaymentMethod):
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
@@ -41,14 +44,11 @@ def create_payment(db, booking_id: int, method: PaymentMethod):
 def generate_nbs_qr(booking: Booking):
     svrha = f"Аренда авто {booking.car.model} {booking.date_from}–{booking.date_to}"
     iznos = f"{booking.total_price:.2f}"
-
     qr_text = f"ST01|{NBS_PRIMALAC}|{svrha}|{iznos}|{NBS_BROJ_RACUNA}"
-
     qr = qrcode.QRCode(version=1, box_size=10, border=4)
     qr.add_data(qr_text)
     qr.make(fit=True)
     img = qr.make_image(fill="black", back_color="white")
-
     bio = BytesIO()
     img.save(bio, format="PNG")
     bio.seek(0)
@@ -59,142 +59,138 @@ def create_freekassa_payment_link(booking: Booking, payment_id: int):
     amount = f"{booking.total_price:.2f}"
     currency = "EUR"
     order_id = str(payment_id)
-
     sign_str = f"{FREEKASSA_MERCHANT_ID}:{amount}:{FREEKASSA_SECRET_1}:{currency}:{order_id}"
     sign = hashlib.md5(sign_str.encode()).hexdigest()
-
-    url = (
-        f"https://pay.freekassa.ru/"
-        f"?m={FREEKASSA_MERCHANT_ID}"
-        f"&oa={amount}"
-        f"&currency={currency}"
-        f"&o={order_id}"
-        f"&s={sign}"
+    return (
+        f"https://pay.freekassa.ru/?m={FREEKASSA_MERCHANT_ID}&oa={amount}"
+        f"&currency={currency}&o={order_id}&s={sign}"
     )
-    return url
-def handle_payment_choice(db, booking_id: int, method: PaymentMethod):
-    payment, booking = create_payment(db, booking_id, method)
-
-    if method == PaymentMethod.NBS_QR:
-        qr_image = generate_nbs_qr(booking)
-        return {
-            "type": "qr",
-            "qr_image": qr_image,
-            "description": f"Отсканируйте QR-код для оплаты аренды {booking.car.model} с {booking.date_from} по {booking.date_to}."
-        }
-
-    elif method == PaymentMethod.FREEKASSA:
-        url = create_freekassa_payment_link(booking, payment.id)
-        return {"type": "link", "url": url}
-
-    else:
-        raise Exception("Неизвестный метод оплаты")
 
 
-async def send_payment_to_user(bot, chat_id: int, payment_result: dict):
-    try:
-        if payment_result["type"] == "qr":
-            qr_image: BytesIO = payment_result["qr_image"]
-            caption = payment_result.get("description", "Отсканируйте QR-код для оплаты")
-            qr_image.seek(0)
-            await bot.send_photo(chat_id, photo=InputFile(qr_image, filename="payment_qr.png"), caption=caption)
-
-        elif payment_result["type"] == "link":
-            url = payment_result["url"]
-            text = f"Перейдите по ссылке для оплаты:\n{url}"
-            await bot.send_message(chat_id, text)
-
-        else:
-            await bot.send_message(chat_id, "Ошибка: неизвестный формат оплаты.")
-    except TelegramAPIError as e:
-        logger.error(f"Telegram API Error: {e}")
-
-
-# --- Хендлеры с кнопками ---
-
-async def start_pay_process(message: types.Message):
-    user_id = message.from_user.id
+# ⬇️ Хендлер запуска через inline-кнопку
+async def start_payment_handler(callback: types.CallbackQuery, state: FSMContext):
     db = SessionLocal()
     try:
+        user = db.query(User).filter(User.telegram_id == callback.from_user.id).first()
+        if not user:
+            await callback.message.edit_text("Вы не зарегистрированы. Пожалуйста, используйте /start.", reply_markup=main_menu_kb())
+            await state.finish()
+            return
+
         bookings = db.query(Booking).filter(
-            Booking.renter.has(telegram_id=user_id),
+            Booking.renter_id == user.id,
             Booking.status == BookingStatus.CONFIRMED
         ).all()
 
         if not bookings:
-            await message.answer("У вас нет бронирований для оплаты.")
+            await callback.message.edit_text("У вас нет бронирований, доступных для оплаты.", reply_markup=main_menu_kb())
+            await state.finish()
             return
 
         keyboard = InlineKeyboardMarkup(row_width=1)
         for b in bookings:
-            btn_text = f"Бронь #{b.id} - {b.car.model} с {b.date_from} по {b.date_to} ({b.total_price} EUR)"
-            keyboard.insert(InlineKeyboardButton(btn_text, callback_data=f"pay_select_booking:{b.id}"))
+            keyboard.add(InlineKeyboardButton(
+                f"{b.car.model} с {b.date_from} по {b.date_to}",
+                callback_data=f"pay_booking_{b.id}"
+            ))
+        keyboard.add(InlineKeyboardButton("Отмена", callback_data="cancel"))
 
-        await message.answer("Выберите бронирование для оплаты:", reply_markup=keyboard)
+        await callback.message.edit_text("Выберите бронирование для оплаты:", reply_markup=keyboard)
+        await PaymentStates.waiting_for_booking.set()
+        await callback.answer()
     finally:
         db.close()
 
 
-async def callback_select_booking(callback: types.CallbackQuery):
-    booking_id = int(callback.data.split(":")[1])
+# ⬇️ Выбор бронирования
+async def select_booking_handler(callback: types.CallbackQuery, state: FSMContext):
+    if callback.data == "cancel":
+        await callback.message.edit_text("Оплата отменена.", reply_markup=main_menu_kb())
+        await state.finish()
+        await callback.answer()
+        return
+
+    if not callback.data.startswith("pay_booking_"):
+        await callback.answer()
+        return
+
+    booking_id = int(callback.data.split("_")[-1])
+    await state.update_data(selected_booking_id=booking_id)
+
     keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton("Оплата через FreeKassa", callback_data="method_freekassa"),
+        InlineKeyboardButton("Оплата через NBS QR", callback_data="method_qr"),
+        InlineKeyboardButton("Отмена", callback_data="cancel")
+    )
 
-    # Показываем только актуальные методы оплаты
-    keyboard.insert(InlineKeyboardButton("FreeKassa", callback_data=f"pay_select_method:{booking_id}:freekassa"))
-    keyboard.insert(InlineKeyboardButton("NBS QR", callback_data=f"pay_select_method:{booking_id}:nbs_qr"))
-
-    await callback.message.edit_text("Выберите метод оплаты:", reply_markup=keyboard)
+    await callback.message.edit_text("Выберите способ оплаты:", reply_markup=keyboard)
+    await PaymentStates.waiting_for_method.set()
     await callback.answer()
 
 
-async def callback_select_method(callback: types.CallbackQuery):
-    parts = callback.data.split(":")
-    booking_id = int(parts[1])
-    method_str = parts[2]
-    method = PaymentMethod(method_str)
-
-    db = SessionLocal()
-    try:
-        payment_result = handle_payment_choice(db, booking_id, method)
-    except Exception as e:
-        await callback.message.answer(f"Ошибка при создании платежа: {e}")
+# ⬇️ Выбор способа оплаты
+async def select_method_handler(callback: types.CallbackQuery, state: FSMContext):
+    if callback.data == "cancel":
+        await callback.message.edit_text("Оплата отменена.", reply_markup=main_menu_kb())
+        await state.finish()
         await callback.answer()
-        db.close()
         return
-    db.close()
 
-    await send_payment_to_user(callback.bot, callback.message.chat.id, payment_result)
-    await callback.answer("Платеж создан!")
+    data = await state.get_data()
+    booking_id = data.get("selected_booking_id")
 
-
-async def pay_cancel_handler(message: types.Message):
     db = SessionLocal()
     try:
-        user_id = message.from_user.id
-        booking = (
-            db.query(Booking)
-            .filter(Booking.renter.has(telegram_id=user_id))
-            .filter(Booking.status == BookingStatus.PENDING)
-            .order_by(Booking.date_from.desc())
-            .first()
-        )
-        if not booking:
-            await message.answer("Нет активных оплат для отмены.")
-            return
+        if callback.data == "method_freekassa":
+            method = PaymentMethod.FREEKASSA
+            payment, booking = create_payment(db, booking_id, method)
+            url = create_freekassa_payment_link(booking, payment.id)
 
-        booking.status = BookingStatus.CANCELLED
-        db.commit()
-        await message.answer(f"Оплата бронирования #{booking.id} отменена.")
-        logger.info(f"User {user_id} cancelled payment for booking {booking.id}")
-    except Exception as e:
-        logger.error(f"Ошибка отмены оплаты: {e}")
-        await message.answer("Ошибка при отмене оплаты. Попробуйте позже.")
+            keyboard = InlineKeyboardMarkup().add(
+                InlineKeyboardButton("Перейти к оплате", url=url)
+            )
+            await callback.message.edit_text("Нажмите кнопку ниже для перехода к оплате:", reply_markup=keyboard)
+
+            confirm_kb = payment_confirmation_kb(payment.id)
+            await callback.message.answer(
+                f"Платеж #{payment.id} на сумму {payment.amount:.2f} RUB. Подтвердите оплату или отмените.",
+                reply_markup=confirm_kb
+            )
+
+        elif callback.data == "method_qr":
+            method = PaymentMethod.NBS_QR
+            payment, booking = create_payment(db, booking_id, method)
+            qr_image = generate_nbs_qr(booking)
+
+            photo = InputFile(qr_image, filename="qr.png")
+            await callback.bot.send_photo(
+                callback.from_user.id,
+                photo=photo,
+                caption=f"Отсканируйте QR-код для оплаты аренды {booking.car.model} с {booking.date_from} по {booking.date_to}.",
+                reply_markup=main_menu_kb()
+            )
+            await callback.message.delete()
+
+            confirm_kb = payment_confirmation_kb(payment.id)
+            await callback.message.answer(
+                f"Платеж #{payment.id} на сумму {payment.amount:.2f} EUR. Подтвердите оплату или отмените.",
+                reply_markup=confirm_kb
+            )
+
+        else:
+            await callback.answer()
+            return
     finally:
         db.close()
 
+    await state.finish()
+    await callback.answer()
 
+
+# ⬇️ Регистрация хендлеров
 def register_payments_handlers(dp: Dispatcher):
-    dp.register_message_handler(start_pay_process, commands=["pay"])
-    dp.register_callback_query_handler(callback_select_booking, lambda c: c.data and c.data.startswith("pay_select_booking:"))
-    dp.register_callback_query_handler(callback_select_method, lambda c: c.data and c.data.startswith("pay_select_method:"))
-    dp.register_message_handler(pay_cancel_handler, commands=["pay_cancel"])
+    dp.register_callback_query_handler(start_payment_handler, lambda c: c.data == "cmd_pay", state="*")
+    dp.register_callback_query_handler(select_booking_handler, lambda c: c.data.startswith("pay_booking_") or c.data == "cancel", state=PaymentStates.waiting_for_booking)
+    dp.register_callback_query_handler(select_method_handler, lambda c: c.data.startswith("method_") or c.data == "cancel", state=PaymentStates.waiting_for_method)
+

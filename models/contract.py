@@ -10,5 +10,6 @@ class Contract(Base):
     contract_pdf_path = Column(String, nullable=True)
     signed = Column(Boolean, default=False)
     signature_data = Column(String, nullable=True)
+    cancelled = Column(Boolean, default=False)
 
     booking = relationship("Booking")

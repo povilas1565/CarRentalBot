@@ -1,13 +1,12 @@
 ﻿from aiogram import types, Dispatcher
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.types import ReplyKeyboardMarkup, ReplyKeyboardRemove
 from database import SessionLocal
+from keyboards.inline import user_type_keyboard, cancel_keyboard
 from models.user import User, UserType
 from loguru import logger
-from handlers.menu import main_menu_kb
 
-# --- STATES ---
+
 class RegistrationFSM(StatesGroup):
     user_type = State()
     get_name = State()
@@ -16,149 +15,120 @@ class RegistrationFSM(StatesGroup):
     get_inn = State()
     get_contact_person = State()
 
-# Клавиатура выбора типа пользователя
-user_type_keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-user_type_keyboard.add("Владелец (физическое лицо)")
-user_type_keyboard.add("Владелец (юридическое лицо)")
-user_type_keyboard.add("Арендатор")
-
-# Начало регистрации
-async def start_registration(message: types.Message):
+async def start_registration(message: types.Message, state: FSMContext):
     await message.answer(
-        "Добро пожаловать в сервис аренды автомобилей RentCar! Пожалуйста, выберите тип пользователя:",
-        reply_markup=user_type_keyboard
+        "Выберите тип пользователя:", reply_markup=user_type_keyboard()
     )
     await RegistrationFSM.user_type.set()
 
-# Обработка выбора типа пользователя
-async def user_type_handler(message: types.Message, state: FSMContext):
-    text = message.text
-    if text not in ["Владелец (физическое лицо)", "Владелец (юридическое лицо)", "Арендатор"]:
-        await message.answer("Пожалуйста, выберите вариант из списка.")
-        return
 
-    await state.update_data(user_type=text)
+# Обработка типа пользователя
+async def user_type_callback_handler(callback: types.CallbackQuery, state: FSMContext):
+    data = callback.data
 
-    if text == "Владелец (физическое лицо)":
+    if data == "user_type_owner_physical":
         await state.update_data(user_type_enum=UserType.OWNER_PHYSICAL)
-        await message.answer("Введите ваше имя:")
-        await RegistrationFSM.get_name.set()
-    elif text == "Владелец (юридическое лицо)":
-        await state.update_data(user_type_enum=UserType.OWNER_LEGAL)
-        await message.answer("Введите название компании:")
-        await RegistrationFSM.get_company_name.set()
-    elif text == "Арендатор":
-        await state.update_data(user_type_enum=UserType.RENTER)
-        await message.answer("Введите ваше имя:")
+        await callback.message.edit_text("Введите ваше имя:", reply_markup=cancel_keyboard())
         await RegistrationFSM.get_name.set()
 
-# Обработка ввода имени
+    elif data == "user_type_owner_legal":
+        await state.update_data(user_type_enum=UserType.OWNER_LEGAL)
+        await callback.message.edit_text("Введите название компании:", reply_markup=cancel_keyboard())
+        await RegistrationFSM.get_company_name.set()
+
+    elif data == "user_type_renter":
+        await state.update_data(user_type_enum=UserType.RENTER)
+        await callback.message.edit_text("Введите ваше имя:", reply_markup=cancel_keyboard())
+        await RegistrationFSM.get_name.set()
+
+    await callback.answer()
+
+
 async def get_name_handler(message: types.Message, state: FSMContext):
     await state.update_data(name=message.text)
-    await message.answer("Введите ваш номер телефона:")
+    await message.answer("Введите ваш номер телефона:", reply_markup=cancel_keyboard())
     await RegistrationFSM.get_phone.set()
 
-# Обработка ввода телефона
-async def get_phone_handler(message: types.Message, state: FSMContext):
-    global db
-    data = await state.get_data()
-    user_type_enum = data.get('user_type_enum')
-    await state.update_data(phone=message.text)
 
-    if user_type_enum == UserType.OWNER_LEGAL:
-        await message.answer("Введите ИНН вашей компании:")
-        await RegistrationFSM.get_inn.set()
-    else:
-        # Сохраняем физ. лицо или арендатора
-        try:
-            db = SessionLocal()
-            telegram_id = message.from_user.id
-            user = db.query(User).filter(User.telegram_id == telegram_id).first()
-            if not user:
-                user = User(
-                    telegram_id=telegram_id,
-                    user_type=user_type_enum,
-                    name=data.get('name'),
-                    phone=message.text,
-                    registered=True
-                )
-                db.add(user)
-            else:
-                user.user_type = user_type_enum
-                user.name = data.get('name')
-                user.phone = message.text
-                user.registered = True
-            db.commit()
-            await message.answer("Регистрация завершена. Спасибо!", reply_markup=ReplyKeyboardRemove())
-            await message.answer("Главное меню:", reply_markup=main_menu_kb())
-            logger.info(f"User registered: {telegram_id}, type: {user.user_type}")
-        except Exception as e:
-            logger.error(f"Error saving user: {e}")
-            await message.answer("Произошла ошибка при регистрации. Попробуйте позже.")
-        finally:
-            db.close()
-        await state.finish()
-
-# Обработка ввода названия компании
 async def get_company_name_handler(message: types.Message, state: FSMContext):
     await state.update_data(company_name=message.text)
-    await message.answer("Введите ваш номер телефона:")
+    await message.answer("Введите номер телефона:", reply_markup=cancel_keyboard())
     await RegistrationFSM.get_phone.set()
 
-# Обработка ввода ИНН
+
+async def get_phone_handler(message: types.Message, state: FSMContext):
+    await state.update_data(phone=message.text)
+    data = await state.get_data()
+    user_type = data.get("user_type_enum")
+
+    if user_type == UserType.OWNER_LEGAL:
+        await message.answer("Введите ИНН компании:", reply_markup=cancel_keyboard())
+        await RegistrationFSM.get_inn.set()
+    else:
+        await save_user_and_finish(message, state, data)
+
+
 async def get_inn_handler(message: types.Message, state: FSMContext):
     await state.update_data(company_inn=message.text)
-    await message.answer("Введите контактное лицо компании:")
+    await message.answer("Введите контактное лицо:", reply_markup=cancel_keyboard())
     await RegistrationFSM.get_contact_person.set()
 
-# Обработка ввода контактного лица компании
-async def get_contact_person_handler(message: types.Message, state: FSMContext):
-    global db
-    data = await state.get_data()
-    await state.update_data(contact_person=message.text)
 
-    # Сохраняем юридическое лицо
+async def get_contact_person_handler(message: types.Message, state: FSMContext):
+    await state.update_data(contact_person=message.text)
+    data = await state.get_data()
+    await save_user_and_finish(message, state, data)
+
+
+# Сохранение пользователя
+async def save_user_and_finish(message: types.Message, state: FSMContext, data: dict):
+    from handlers.menu import main_menu_kb
+    db = SessionLocal()
     try:
-        db = SessionLocal()
         telegram_id = message.from_user.id
         user = db.query(User).filter(User.telegram_id == telegram_id).first()
+
         if not user:
-            user = User(
-                telegram_id=telegram_id,
-                user_type=data['user_type_enum'],
-                company_name=data.get('company_name'),
-                phone=data.get('phone'),
-                company_inn=data.get('company_inn'),
-                contact_person=data.get('contact_person'),
-                registered=True
-            )
+            user = User(telegram_id=telegram_id)
             db.add(user)
-        else:
-            user.user_type = data['user_type_enum']
-            user.company_name = data.get('company_name')
-            user.phone = data.get('phone')
-            user.company_inn = data.get('company_inn')
-            user.contact_person = data.get('contact_person')
-            user.registered = True
+
+        user.user_type = data.get("user_type_enum")
+        user.name = data.get("name")
+        user.phone = data.get("phone")
+        user.company_name = data.get("company_name")
+        user.company_inn = data.get("company_inn")
+        user.contact_person = data.get("contact_person")
+        user.registered = True
+
         db.commit()
-        await message.answer("Регистрация завершена. Спасибо!", reply_markup=ReplyKeyboardRemove())
-        await message.answer("Главное меню:", reply_markup=main_menu_kb())
-        logger.info(f"Legal entity registered: {telegram_id}")
+        await message.answer("✅ Регистрация завершена. Спасибо!", reply_markup=main_menu_kb())
+        logger.info(f"User registered: {telegram_id}, type: {user.user_type}")
     except Exception as e:
-        logger.error(f"Error saving legal user: {e}")
-        await message.answer("Произошла ошибка при регистрации. Попробуйте позже.")
+        logger.error(f"Registration error: {e}")
+        await message.answer("❌ Ошибка при регистрации. Попробуйте позже.", reply_markup=main_menu_kb())
     finally:
         db.close()
+        await state.finish()
 
+
+# Отмена регистрации (универсальный)
+async def cancel_registration_handler(event: types.Message | types.CallbackQuery, state: FSMContext):
+    from handlers.menu import main_menu_kb
     await state.finish()
 
-# Регистрация хендлеров
+    if isinstance(event, types.CallbackQuery):
+        await event.message.edit_text("🚫 Регистрация отменена.", reply_markup=main_menu_kb())
+        await event.answer()
+    else:
+        await event.answer("🚫 Регистрация отменена.", reply_markup=main_menu_kb())
 
+
+# Регистрация хендлеров
 def register_registration_handlers(dp: Dispatcher):
-    dp.register_message_handler(start_registration, commands=['start'], state="*")
-    dp.register_message_handler(user_type_handler, state=RegistrationFSM.user_type)
+    dp.register_callback_query_handler(user_type_callback_handler, lambda c: c.data.startswith("user_type_"), state=RegistrationFSM.user_type)
+    dp.register_callback_query_handler(cancel_registration_handler, lambda c: c.data == "cancel_registration", state="*")
     dp.register_message_handler(get_name_handler, state=RegistrationFSM.get_name)
-    dp.register_message_handler(get_phone_handler, state=RegistrationFSM.get_phone)
     dp.register_message_handler(get_company_name_handler, state=RegistrationFSM.get_company_name)
+    dp.register_message_handler(get_phone_handler, state=RegistrationFSM.get_phone)
     dp.register_message_handler(get_inn_handler, state=RegistrationFSM.get_inn)
     dp.register_message_handler(get_contact_person_handler, state=RegistrationFSM.get_contact_person)
