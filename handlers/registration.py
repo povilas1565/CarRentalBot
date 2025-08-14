@@ -5,6 +5,7 @@ from database import SessionLocal
 from keyboards.inline import user_type_keyboard, cancel_keyboard
 from models.user import User, UserType
 from loguru import logger
+from handlers.menu import main_menu_kb
 
 
 class RegistrationFSM(StatesGroup):
@@ -15,14 +16,12 @@ class RegistrationFSM(StatesGroup):
     get_inn = State()
     get_contact_person = State()
 
+
 async def start_registration(message: types.Message, state: FSMContext):
-    await message.answer(
-        "Выберите тип пользователя:", reply_markup=user_type_keyboard()
-    )
+    await message.answer("Выберите тип пользователя:", reply_markup=user_type_keyboard())
     await RegistrationFSM.user_type.set()
 
 
-# Обработка типа пользователя
 async def user_type_callback_handler(callback: types.CallbackQuery, state: FSMContext):
     data = callback.data
 
@@ -80,9 +79,7 @@ async def get_contact_person_handler(message: types.Message, state: FSMContext):
     await save_user_and_finish(message, state, data)
 
 
-# Сохранение пользователя
 async def save_user_and_finish(message: types.Message, state: FSMContext, data: dict):
-    from handlers.menu import main_menu_kb
     db = SessionLocal()
     try:
         telegram_id = message.from_user.id
@@ -111,9 +108,7 @@ async def save_user_and_finish(message: types.Message, state: FSMContext, data: 
         await state.finish()
 
 
-# Отмена регистрации (универсальный)
 async def cancel_registration_handler(event: types.Message | types.CallbackQuery, state: FSMContext):
-    from handlers.menu import main_menu_kb
     await state.finish()
 
     if isinstance(event, types.CallbackQuery):
@@ -123,7 +118,6 @@ async def cancel_registration_handler(event: types.Message | types.CallbackQuery
         await event.answer("🚫 Регистрация отменена.", reply_markup=main_menu_kb())
 
 
-# Регистрация хендлеров
 def register_registration_handlers(dp: Dispatcher):
     dp.register_callback_query_handler(user_type_callback_handler, lambda c: c.data.startswith("user_type_"), state=RegistrationFSM.user_type)
     dp.register_callback_query_handler(cancel_registration_handler, lambda c: c.data == "cancel_registration", state="*")

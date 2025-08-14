@@ -15,6 +15,21 @@ from keyboards.inline import (
     confirm_booking_kb, date_from_kb, date_to_kb
 )
 
+# bookings.py
+from aiogram import types, Dispatcher
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import StatesGroup, State
+from sqlalchemy.orm import Session
+from datetime import datetime
+from loguru import logger
+
+from database import SessionLocal
+from models.booking import Booking, BookingStatus
+from models.user import User
+from models.car import Car
+from handlers.calculator import calculate_rental_price
+from keyboards.inline import get_city_kb, get_car_kb, confirm_booking_kb, date_from_kb, date_to_kb
+
 
 class BookingFSM(StatesGroup):
     select_city = State()
@@ -80,7 +95,8 @@ async def select_date_from(msg: types.Message, state: FSMContext):
         await msg.answer("Введите дату окончания бронирования в формате ДД.MM.ГГГГ:", reply_markup=date_to_kb())
         await BookingFSM.select_date_to.set()
     except Exception:
-        await msg.answer("❌ Некорректная дата. Введите в формате ДД.ММ.ГГГГ, не в прошлом.", reply_markup=date_from_kb())
+        await msg.answer("❌ Некорректная дата. Введите в формате ДД.ММ.ГГГГ, не в прошлом.",
+                         reply_markup=date_from_kb())
 
 
 # Шаг 5 — дата окончания
@@ -192,20 +208,20 @@ async def back_to_car_from_date(callback: types.CallbackQuery, state: FSMContext
 
 # 🔙 Назад — к дате начала из даты окончания
 async def back_to_date_from(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("Введите дату начала бронирования в формате ДД.ММ.ГГГГ:", reply_markup=date_from_kb())
+    await callback.message.edit_text("Введите дату начала бронирования в формате ДД.ММ.ГГГГ:",
+                                     reply_markup=date_from_kb())
     await BookingFSM.select_date_from.set()
 
 
 # Регистрация хендлеров
 def register_bookings_handlers(dp: Dispatcher):
-    dp.register_callback_query_handler(select_city_handler, lambda c: c.data.startswith("city:"), state=BookingFSM.select_city)
+    dp.register_callback_query_handler(select_city_handler, lambda c: c.data.startswith("city:"),
+                                       state=BookingFSM.select_city)
     dp.register_callback_query_handler(select_car, lambda c: c.data.startswith("car:"), state=BookingFSM.select_car)
-
     dp.register_message_handler(select_date_from, state=BookingFSM.select_date_from)
     dp.register_message_handler(select_date_to, state=BookingFSM.select_date_to)
-    dp.register_callback_query_handler(confirm_booking, lambda c: c.data.startswith("confirm:"), state=BookingFSM.confirm_booking)
-
-    # 🔙 Назад
+    dp.register_callback_query_handler(confirm_booking, lambda c: c.data.startswith("confirm:"),
+                                       state=BookingFSM.confirm_booking)
     dp.register_callback_query_handler(back_to_city, lambda c: c.data == "back:city", state="*")
     dp.register_callback_query_handler(back_to_car, lambda c: c.data == "back:dates", state="*")
     dp.register_callback_query_handler(back_to_car_from_date, lambda c: c.data == "back:car", state="*")

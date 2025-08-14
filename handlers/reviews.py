@@ -8,8 +8,6 @@ from keyboards.inline import cancel_kb, comment_kb
 from models.car import Car
 from models.review import Review
 from models.booking import Booking
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
 from handlers.menu import main_menu_kb
 
 
@@ -20,7 +18,7 @@ class ReviewStates(StatesGroup):
     waiting_for_car_id = State()
 
 
-# Старт отзыва
+# ⬇️ Старт добавления отзыва
 async def review_start_handler(callback: types.CallbackQuery):
     await callback.message.edit_text(
         "Введите ID бронирования, чтобы оставить отзыв:",
@@ -30,7 +28,7 @@ async def review_start_handler(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# Ввод ID бронирования
+# ⬇️ Обработка ID бронирования
 async def process_booking_id(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
         await message.answer("ID должен быть числом. Попробуйте снова:", reply_markup=cancel_kb())
@@ -57,11 +55,10 @@ async def process_booking_id(message: types.Message, state: FSMContext):
     await ReviewStates.waiting_for_rating.set()
 
 
-# Ввод рейтинга
+# ⬇️ Обработка рейтинга
 async def process_rating(message: types.Message, state: FSMContext):
-    text = message.text.strip().replace(',', '.')
     try:
-        rating = float(text)
+        rating = float(message.text.strip().replace(',', '.'))
         if not (1 <= rating <= 5):
             raise ValueError()
     except ValueError:
@@ -69,7 +66,6 @@ async def process_rating(message: types.Message, state: FSMContext):
         return
 
     await state.update_data(rating=rating)
-
     await message.answer(
         "Напишите отзыв или нажмите 'Пропустить':",
         reply_markup=comment_kb()
@@ -77,10 +73,10 @@ async def process_rating(message: types.Message, state: FSMContext):
     await ReviewStates.waiting_for_comment.set()
 
 
-# Ввод комментария
+# ⬇️ Обработка комментария
 async def process_comment(message: types.Message, state: FSMContext):
-    comment = message.text.strip()
     data = await state.get_data()
+    comment = message.text.strip() or None
 
     db = SessionLocal()
     db.add(Review(
@@ -96,9 +92,10 @@ async def process_comment(message: types.Message, state: FSMContext):
     await state.finish()
 
 
-# Пропуск комментария
+# ⬇️ Пропуск комментария
 async def skip_comment_callback(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
+
     db = SessionLocal()
     db.add(Review(
         car_id=data["car_id"],
@@ -114,14 +111,14 @@ async def skip_comment_callback(callback: types.CallbackQuery, state: FSMContext
     await callback.answer()
 
 
-# Отмена на любом этапе
+# ⬇️ Отмена действия
 async def cancel_callback(callback: types.CallbackQuery, state: FSMContext):
     await state.finish()
     await callback.message.edit_text("Действие отменено.", reply_markup=main_menu_kb())
     await callback.answer()
 
 
-# Старт просмотра отзывов
+# ⬇️ Старт просмотра отзывов
 async def show_reviews_start(callback: types.CallbackQuery):
     await callback.message.edit_text(
         "Введите ID автомобиля для просмотра отзывов:",
@@ -131,7 +128,7 @@ async def show_reviews_start(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# Ввод ID авто для просмотра
+# ⬇️ Обработка ID авто для просмотра
 async def process_car_id(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
         await message.answer("ID должен быть числом. Попробуйте снова:", reply_markup=cancel_kb())
@@ -156,7 +153,6 @@ async def process_car_id(message: types.Message, state: FSMContext):
 
     avg_text = f"{round(avg_rating, 2):.2f}" if avg_rating else "нет данных"
     msg = f"Отзывы для {car.model} (средний рейтинг: {avg_text}):\n\n"
-
     for r in reviews:
         msg += f"👤 Пользователь {r.renter_id}\n⭐️ {r.rating}\n💬 {r.comment or '—'}\n\n"
 
@@ -164,7 +160,7 @@ async def process_car_id(message: types.Message, state: FSMContext):
     await state.finish()
 
 
-# Регистрация хендлеров
+# ⬇️ Регистрация хендлеров
 def register_reviews_handlers(dp: Dispatcher):
     dp.register_callback_query_handler(review_start_handler, lambda c: c.data == "cmd_review", state="*")
     dp.register_callback_query_handler(show_reviews_start, lambda c: c.data == "cmd_reviews", state="*")
@@ -174,5 +170,6 @@ def register_reviews_handlers(dp: Dispatcher):
     dp.register_message_handler(process_comment, state=ReviewStates.waiting_for_comment)
     dp.register_message_handler(process_car_id, state=ReviewStates.waiting_for_car_id)
 
-    dp.register_callback_query_handler(skip_comment_callback, lambda c: c.data == "skip_comment", state=ReviewStates.waiting_for_comment)
+    dp.register_callback_query_handler(skip_comment_callback, lambda c: c.data == "skip_comment",
+                                       state=ReviewStates.waiting_for_comment)
     dp.register_callback_query_handler(cancel_callback, lambda c: c.data == "cancel", state="*")

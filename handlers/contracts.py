@@ -12,7 +12,6 @@ from models.contract import Contract
 from models.user import User
 from loguru import logger
 
-
 # Jinja2 шаблоны
 env = Environment(loader=FileSystemLoader('templates'))
 
@@ -20,9 +19,10 @@ env = Environment(loader=FileSystemLoader('templates'))
 class ContractStates(StatesGroup):
     SELECT_BOOKING = State()
     CONFIRM_SIGNATURE = State()
+    AWAITING_CANCEL_SELECTION = State()
 
 
-# Создание inline-кнопок бронирований
+# Inline-кнопки для выбора бронирования
 def booking_selection_kb(bookings):
     keyboard = InlineKeyboardMarkup(row_width=1)
     for booking in bookings:
@@ -32,23 +32,22 @@ def booking_selection_kb(bookings):
     return keyboard
 
 
-# Кнопки подтверждения подписания
+# Кнопки подтверждения подписи
 def confirm_signature_kb():
     keyboard = InlineKeyboardMarkup(row_width=2)
     keyboard.add(
         InlineKeyboardButton("✅ Да", callback_data="sign_yes"),
-        InlineKeyboardButton("❌ Нет", callback_data="sign_no"),
-        InlineKeyboardButton("Отмена", callback_data="cancel_contract")
+        InlineKeyboardButton("❌ Нет", callback_data="sign_no")
     )
+    keyboard.add(InlineKeyboardButton("❌ Отмена", callback_data="cancel_contract"))
     return keyboard
 
 
-# Старт
+# Старт создания контракта
 async def start_contract(message: types.Message, state: FSMContext):
     db = SessionLocal()
     try:
-        telegram_id = message.from_user.id
-        user = db.query(User).filter(User.telegram_id == telegram_id).first()
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
         if not user:
             await message.answer("Вы не зарегистрированы. Используйте /start для регистрации.")
             await state.finish()
@@ -65,7 +64,10 @@ async def start_contract(message: types.Message, state: FSMContext):
             return
 
         await state.update_data(bookings_map={b.id: b for b in bookings})
-        await message.answer("Выберите бронирование для создания контракта:", reply_markup=booking_selection_kb(bookings))
+        await message.answer(
+            "Выберите бронирование для создания контракта:",
+            reply_markup=booking_selection_kb(bookings)
+        )
         await ContractStates.SELECT_BOOKING.set()
     finally:
         db.close()
@@ -81,7 +83,6 @@ async def select_booking_callback(callback: types.CallbackQuery, state: FSMConte
     booking_id = int(booking_id_str)
     data = await state.get_data()
     bookings_map = data.get("bookings_map", {})
-
     booking = bookings_map.get(booking_id)
     if not booking:
         await callback.answer("Бронирование не найдено.")
@@ -127,15 +128,14 @@ async def select_booking_callback(callback: types.CallbackQuery, state: FSMConte
 # Подтверждение подписи
 async def confirm_signature_callback(callback: types.CallbackQuery, state: FSMContext):
     from handlers.menu import main_menu_kb
-    answer = callback.data
 
-    if answer == "sign_no":
-        await callback.message.edit_text("Подписание отменено.", reply_markup=main_menu_kb())
+    if callback.data in ["sign_no", "cancel_contract"]:
+        await callback.message.edit_text("Операция отменена.", reply_markup=main_menu_kb())
         await state.finish()
         await callback.answer()
         return
 
-    if answer != "sign_yes":
+    if callback.data != "sign_yes":
         await callback.answer()
         return
 
@@ -156,13 +156,11 @@ async def confirm_signature_callback(callback: types.CallbackQuery, state: FSMCo
             return
 
         booking.contract_signed = True
-
         contract = db.query(Contract).filter(Contract.booking_id == booking.id).first()
         if contract:
             contract.signed = True
 
         db.commit()
-
         await callback.message.edit_text("✅ Контракт подписан успешно!", reply_markup=main_menu_kb())
         logger.info(f"User {booking.renter_id} подписал контракт #{booking.id}")
     except Exception as e:
@@ -174,27 +172,26 @@ async def confirm_signature_callback(callback: types.CallbackQuery, state: FSMCo
         await callback.answer()
 
 
-# Отмена
+# Отмена контракта или аннулирование
 async def cancel_contract_callback(callback: types.CallbackQuery, state: FSMContext):
     from handlers.menu import main_menu_kb
     db = SessionLocal()
     try:
-        telegram_id = callback.from_user.id
-        user = db.query(User).filter(User.telegram_id == telegram_id).first()
-
+        user = db.query(User).filter(User.telegram_id == callback.from_user.id).first()
         if not user:
             await callback.message.edit_text("Вы не зарегистрированы.")
             return
 
-        # Найти подписанные контракты
         contracts = db.query(Contract).join(Booking).options(joinedload(Contract.booking)) \
             .filter(Booking.renter_id == user.id, Contract.signed == True).all()
 
         if not contracts:
-            await callback.message.edit_text("У вас нет подписанных договоров для аннулирования.", reply_markup=main_menu_kb())
+            await callback.message.edit_text(
+                "У вас нет подписанных договоров для аннулирования.",
+                reply_markup=main_menu_kb()
+            )
             return
 
-        # Список для выбора контракта
         kb = InlineKeyboardMarkup(row_width=1)
         for contract in contracts:
             booking = contract.booking
@@ -202,10 +199,10 @@ async def cancel_contract_callback(callback: types.CallbackQuery, state: FSMCont
                 f"#{booking.id} от {booking.date_from} до {booking.date_to}",
                 callback_data=f"cancel_contract_{contract.id}"
             ))
-        kb.add(InlineKeyboardButton("⬅️ Назад", callback_data="submenu_contracts"))
+        kb.add(InlineKeyboardButton("⬅️ Назад", callback_data="cancel_contract_back"))
 
         await callback.message.edit_text("Выберите договор для аннулирования:", reply_markup=kb)
-        await state.set_state("awaiting_cancel_selection")
+        await ContractStates.AWAITING_CANCEL_SELECTION.set()
     except Exception as e:
         logger.error(f"Ошибка при показе аннулирования: {e}")
         await callback.message.edit_text("Ошибка при загрузке договоров.")
@@ -213,8 +210,15 @@ async def cancel_contract_callback(callback: types.CallbackQuery, state: FSMCont
         db.close()
         await callback.answer()
 
+
 async def confirm_cancel_contract(callback: types.CallbackQuery, state: FSMContext):
     from handlers.menu import main_menu_kb
+    if callback.data == "cancel_contract_back":
+        await callback.message.edit_text("Отмена операции.", reply_markup=main_menu_kb())
+        await state.finish()
+        await callback.answer()
+        return
+
     contract_id_str = callback.data.replace("cancel_contract_", "")
     if not contract_id_str.isdigit():
         await callback.answer("Неверный формат.")
@@ -224,9 +228,9 @@ async def confirm_cancel_contract(callback: types.CallbackQuery, state: FSMConte
     db = SessionLocal()
     try:
         contract = db.query(Contract).filter(Contract.id == contract_id, Contract.signed == True).first()
-
         if not contract:
             await callback.message.edit_text("Договор не найден или уже аннулирован.", reply_markup=main_menu_kb())
+            await state.finish()
             return
 
         booking = db.query(Booking).filter(Booking.id == contract.booking_id).first()
@@ -235,7 +239,6 @@ async def confirm_cancel_contract(callback: types.CallbackQuery, state: FSMConte
 
         db.delete(contract)
         db.commit()
-
         await callback.message.edit_text("✅ Договор успешно аннулирован.", reply_markup=main_menu_kb())
         logger.info(f"Пользователь аннулировал договор ID={contract_id}")
     except Exception as e:
@@ -246,9 +249,26 @@ async def confirm_cancel_contract(callback: types.CallbackQuery, state: FSMConte
         await state.finish()
         await callback.answer()
 
+
 # Регистрация хендлеров
 def register_contracts_handlers(dp: Dispatcher):
-    dp.register_callback_query_handler(select_booking_callback, lambda c: c.data.startswith("select_booking_"), state=ContractStates.SELECT_BOOKING)
-    dp.register_callback_query_handler(confirm_signature_callback, lambda c: c.data.startswith("sign_"), state=ContractStates.CONFIRM_SIGNATURE)
-    dp.register_callback_query_handler(cancel_contract_callback, lambda c: c.data == "cmd_cancel_contract", state="*")
-    dp.register_callback_query_handler(confirm_cancel_contract, lambda c: c.data.startswith("cancel_contract_"), state="awaiting_cancel_selection")
+    dp.register_callback_query_handler(
+        select_booking_callback,
+        lambda c: c.data.startswith("select_booking_"),
+        state=ContractStates.SELECT_BOOKING
+    )
+    dp.register_callback_query_handler(
+        confirm_signature_callback,
+        lambda c: c.data.startswith("sign_") or c.data == "cancel_contract",
+        state=ContractStates.CONFIRM_SIGNATURE
+    )
+    dp.register_callback_query_handler(
+        cancel_contract_callback,
+        lambda c: c.data == "cancel_contract",
+        state="*"
+    )
+    dp.register_callback_query_handler(
+        confirm_cancel_contract,
+        lambda c: c.data.startswith("cancel_contract_") or c.data == "cancel_contract_back",
+        state=ContractStates.AWAITING_CANCEL_SELECTION
+    )
