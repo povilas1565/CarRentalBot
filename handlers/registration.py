@@ -5,7 +5,6 @@ from database import SessionLocal
 from keyboards.inline import user_type_keyboard, cancel_keyboard
 from models.user import User, UserType
 from loguru import logger
-from handlers.menu import main_menu_kb
 
 
 class RegistrationFSM(StatesGroup):
@@ -80,6 +79,7 @@ async def get_contact_person_handler(message: types.Message, state: FSMContext):
 
 
 async def save_user_and_finish(message: types.Message, state: FSMContext, data: dict):
+    from handlers.menu import main_menu_kb
     db = SessionLocal()
     try:
         telegram_id = message.from_user.id
@@ -109,6 +109,7 @@ async def save_user_and_finish(message: types.Message, state: FSMContext, data: 
 
 
 async def cancel_registration_handler(event: types.Message | types.CallbackQuery, state: FSMContext):
+    from handlers.menu import main_menu_kb
     await state.finish()
 
     if isinstance(event, types.CallbackQuery):
