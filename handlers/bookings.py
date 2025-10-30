@@ -15,22 +15,6 @@ from keyboards.inline import (
     confirm_booking_kb, date_from_kb, date_to_kb
 )
 
-# bookings.py
-from aiogram import types, Dispatcher
-from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters.state import StatesGroup, State
-from sqlalchemy.orm import Session
-from datetime import datetime
-from loguru import logger
-
-from database import SessionLocal
-from models.booking import Booking, BookingStatus
-from models.user import User
-from models.car import Car
-from handlers.calculator import calculate_rental_price
-from keyboards.inline import get_city_kb, get_car_kb, confirm_booking_kb, date_from_kb, date_to_kb
-
-
 class BookingFSM(StatesGroup):
     select_city = State()
     select_car = State()
