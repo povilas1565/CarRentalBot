@@ -56,10 +56,24 @@ async def select_car(callback: types.CallbackQuery, state: FSMContext):
     car_id = int(callback.data.split(":")[1])
     data = await state.get_data()
     await state.update_data(selected_car_id=car_id)
-
+    
     db: Session = SessionLocal()
-    car = db.query(Car).filter(Car.id == car_id).first()
-    db.close()
+    try:
+        car = db.query(Car).filter(Car.id == car_id).first()
+        # ⬇️ Проверяем регистрацию прямо тут
+        user_exists = db.query(User).filter(
+            User.telegram_id == callback.from_user.id,
+            User.registered == True
+        ).first()
+    finally:
+        db.close()
+
+    if not user_exists:
+        # помечаем, что после регистрации надо продолжить бронирование
+        await state.update_data(resume_booking=True)
+        from handlers.registration import start_registration
+        await start_registration(callback.message, state)
+        return
 
     if car and car.photo_file_id:
         await callback.message.answer_photo(photo=car.photo_file_id, caption=f"{car.brand} {car.model} ({car.year})")
