@@ -105,6 +105,13 @@ async def save_user_and_finish(message: types.Message, state: FSMContext, data: 
         await message.answer("❌ Ошибка при регистрации. Попробуйте позже.", reply_markup=main_menu_kb())
     finally:
         db.close()
+        # ⬇️ если регистрация запущена прямо из бронирования — продолжаем бронирование
+        data_after = await state.get_data()
+        if data_after.get("resume_booking"):
+            from handlers.bookings import BookingFSM, date_from_kb
+            await message.answer("Отлично! Теперь укажите дату начала аренды (ДД.ММ.ГГГГ):", reply_markup=date_from_kb())
+            await BookingFSM.select_date_from.set()
+            return
         await state.finish()
 
 
