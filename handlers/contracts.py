@@ -53,10 +53,10 @@ async def start_contract(message: types.Message, state: FSMContext):
             await state.finish()
             return
 
-        bookings = db.query(Booking).filter(
-            Booking.renter_id == user.id,
-            Booking.status == "confirmed"
-        ).all()
+         bookings = db.query(Booking).filter(
+             Booking.renter_id == user.id,
+             Booking.status == BookingStatus.CONFIRMED
+         ).all()
 
         if not bookings:
             await message.answer("У вас нет активных бронирований.")
@@ -90,11 +90,12 @@ async def select_booking_callback(callback: types.CallbackQuery, state: FSMConte
 
     db = SessionLocal()
     try:
-        template = env.get_template("contract_template.html")
+        template = env.get_template("contract_template.html")     
+        
         contract_text = template.render(
-            booking=booking,
-            user=booking.user,
-            car=booking.car
+             booking=booking,
+             user=booking.renter,
+             car=booking.car
         )
 
         os.makedirs("contracts", exist_ok=True)
