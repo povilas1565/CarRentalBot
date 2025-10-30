@@ -71,10 +71,10 @@ async def process_menu_callbacks(callback: types.CallbackQuery, state: FSMContex
 
     if data == "cmd_catalog":
         await callback.message.delete()
-        await cars.show_catalog(callback.message)
+        await show_catalog(callback.message)
         await callback.answer()
         return
-
+    
     if data == "cmd_register":
         await callback.message.delete()
         await start_registration(callback.message, state)
@@ -237,7 +237,15 @@ async def menu_command(message: types.Message):
 
 # Регистрация хендлеров
 def register_menu_handlers(dp: Dispatcher):
-    dp.register_message_handler(start_command, commands=["start"], state="*")
-    dp.register_message_handler(menu_command, commands=["menu"], state="*")
-    dp.register_callback_query_handler(process_menu_callbacks, state="*")
-    dp.register_callback_query_handler(confirmation_handler, state=MenuFSM.waiting_for_confirmation)
+     dp.register_message_handler(start_command, commands=["start"], state="*")
+     dp.register_message_handler(menu_command, commands=["menu"], state="*")
+     dp.register_callback_query_handler(process_menu_callbacks, state="*")
+     # Ловим только кнопки оплат из инлайнов
+     dp.register_callback_query_handler(
+        confirmation_handler,
+        lambda c: c.data.startswith("pay_confirm_")
+                  or c.data == "pay_decline"
+                  or c.data.startswith("pay_cancel_confirm_")
+                  or c.data == "pay_cancel_decline",
+        state="*"
+    )
