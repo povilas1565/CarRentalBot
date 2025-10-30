@@ -80,12 +80,8 @@ async def process_menu_callbacks(callback: types.CallbackQuery, state: FSMContex
         await start_registration(callback.message, state)
         await callback.answer()
         return
-
+        
     if data == "cmd_book":
-        if not await require_registration(callback.message):
-            await callback.message.answer("⚠️ Для бронирования необходимо зарегистрироваться.")
-            await start_registration(callback.message, state)
-            return
         await callback.message.delete()
         await start_booking(callback.message, state)
         await callback.answer()
