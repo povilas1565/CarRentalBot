@@ -48,7 +48,7 @@ def generate_nbs_qr(booking: Booking):
     qr = qrcode.QRCode(version=1, box_size=10, border=4)
     qr.add_data(qr_text)
     qr.make(fit=True)
-    img = qr.make_image(fill="black", back_color="white")
+    img = qr.make_image(fill_color="black", back_color="white")
     bio = BytesIO()
     img.save(bio, format="PNG")
     bio.seek(0)
@@ -154,9 +154,10 @@ async def select_method_handler(callback: types.CallbackQuery, state: FSMContext
 
             confirm_kb = payment_confirmation_kb(payment.id)
             await callback.message.answer(
-                f"Платеж #{payment.id} на сумму {payment.amount:.2f} RUB. Подтвердите оплату или отмените.",
+                f"Платеж #{payment.id} на сумму {payment.amount:.2f} EUR. Подтвердите оплату или отмените.",
                 reply_markup=confirm_kb
             )
+
 
         elif callback.data == "method_qr":
             method = PaymentMethod.NBS_QR
