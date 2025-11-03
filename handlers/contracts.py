@@ -7,7 +7,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.orm import joinedload
 
 from database import SessionLocal
-from models.booking import Booking
+from models.booking import Booking, BookingStatus
 from models.contract import Contract
 from models.user import User
 from loguru import logger
@@ -43,7 +43,6 @@ def confirm_signature_kb():
     return keyboard
 
 
-# Старт создания контракта
 async def start_contract(message: types.Message, state: FSMContext):
     db = SessionLocal()
     try:
@@ -51,12 +50,12 @@ async def start_contract(message: types.Message, state: FSMContext):
         if not user:
             await message.answer("Вы не зарегистрированы. Используйте /start для регистрации.")
             await state.finish()
-            return
+            return  # ← return ДОЛЖЕН быть внутри этого if
 
-         bookings = db.query(Booking).filter(
-             Booking.renter_id == user.id,
-             Booking.status == BookingStatus.CONFIRMED
-         ).all()
+        bookings = db.query(Booking).filter(
+            Booking.renter_id == user.id,
+            Booking.status == BookingStatus.CONFIRMED
+        ).all()
 
         if not bookings:
             await message.answer("У вас нет активных бронирований.")
@@ -90,12 +89,12 @@ async def select_booking_callback(callback: types.CallbackQuery, state: FSMConte
 
     db = SessionLocal()
     try:
-        template = env.get_template("contract_template.html")     
-        
+        template = env.get_template("contract_template.html")
+
         contract_text = template.render(
-             booking=booking,
-             user=booking.renter,
-             car=booking.car
+            booking=booking,
+            user=booking.renter,
+            car=booking.car
         )
 
         os.makedirs("contracts", exist_ok=True)

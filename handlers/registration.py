@@ -99,25 +99,25 @@ async def save_user_and_finish(message: types.Message, state: FSMContext, data: 
 
         if not user:
             user = User(
-                 telegram_id=telegram_id,
-                 user_type=data.get("user_type_enum"),
-                 name=data.get("name"),
-                 phone=data.get("phone"),
-                 company_name=data.get("company_name"),
-                 company_inn=data.get("company_inn"),  # здесь будет PIB для Сербии
-                 contact_person=data.get("contact_person"),
-                 registered=True,
-             )
-             db.add(user)
-         else:
-             user.user_type = data.get("user_type_enum")
-             user.name = data.get("name")
-             user.phone = data.get("phone")
-             user.company_name = data.get("company_name")
-             user.company_inn = data.get("company_inn")
-             user.contact_person = data.get("contact_person")
-             user.registered = True
-             
+                telegram_id=telegram_id,
+                user_type=data.get("user_type_enum"),
+                name=data.get("name"),
+                phone=data.get("phone"),
+                company_name=data.get("company_name"),
+                company_inn=data.get("company_inn"),  # здесь будет PIB для Сербии
+                contact_person=data.get("contact_person"),
+                registered=True,
+            )
+            db.add(user)
+        else:
+            user.user_type = data.get("user_type_enum")
+            user.name = data.get("name")
+            user.phone = data.get("phone")
+            user.company_name = data.get("company_name")
+            user.company_inn = data.get("company_inn")
+            user.contact_person = data.get("contact_person")
+            user.registered = True
+
         db.commit()
         await message.answer("✅ Регистрация завершена. Спасибо!", reply_markup=main_menu_kb())
         logger.info(f"User registered: {telegram_id}, type: {user.user_type}")
@@ -131,11 +131,13 @@ async def save_user_and_finish(message: types.Message, state: FSMContext, data: 
         data_after = await state.get_data()
         if data_after.get("resume_booking"):
             from handlers.bookings import BookingFSM, date_from_kb
-            await message.answer("Отлично! Теперь укажите дату начала аренды (ДД.ММ.ГГГГ):", reply_markup=date_from_kb())
+            await message.answer(
+                "Отлично! Теперь укажите дату начала аренды (ДД.ММ.ГГГГ):",
+                reply_markup=date_from_kb()
+            )
             await BookingFSM.select_date_from.set()
             return
         await state.finish()
-
 
 async def cancel_registration_handler(event: types.Message | types.CallbackQuery, state: FSMContext):
     from handlers.menu import main_menu_kb
