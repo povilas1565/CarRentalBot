@@ -5,6 +5,16 @@ from database import SessionLocal
 from keyboards.inline import user_type_keyboard, cancel_keyboard
 from models.user import User, UserType
 from loguru import logger
+import re
+
+def normalize_phone(raw: str) -> str:
+    s = (raw or "").strip()
+    # убрать пробелы/скобки/тире/точки
+    s = re.sub(r"[()\s\-\.]", "", s)
+    # 00... -> +...
+    if s.startswith("00"):
+        s = "+" + s[2:]
+    return s
 
 
 class RegistrationFSM(StatesGroup):
@@ -55,15 +65,17 @@ async def get_company_name_handler(message: types.Message, state: FSMContext):
 
 
 async def get_phone_handler(message: types.Message, state: FSMContext):
-    await state.update_data(phone=message.text)
+    phone = normalize_phone(message.text)
+    await state.update_data(phone=phone)
+    
     data = await state.get_data()
     user_type = data.get("user_type_enum")
 
     if user_type == UserType.OWNER_LEGAL:
-        await message.answer("Введите ИНН компании:", reply_markup=cancel_keyboard())
+        await message.answer("Введите PIB компании:", reply_markup=cancel_keyboard())
         await RegistrationFSM.get_inn.set()
     else:
-        await save_user_and_finish(message, state, data)
+        await save_user_and_finish(message, state, await state.get_data())
 
 
 async def get_inn_handler(message: types.Message, state: FSMContext):
@@ -86,22 +98,32 @@ async def save_user_and_finish(message: types.Message, state: FSMContext, data: 
         user = db.query(User).filter(User.telegram_id == telegram_id).first()
 
         if not user:
-            user = User(telegram_id=telegram_id)
-            db.add(user)
-
-        user.user_type = data.get("user_type_enum")
-        user.name = data.get("name")
-        user.phone = data.get("phone")
-        user.company_name = data.get("company_name")
-        user.company_inn = data.get("company_inn")
-        user.contact_person = data.get("contact_person")
-        user.registered = True
-
+            user = User(
+                 telegram_id=telegram_id,
+                 user_type=data.get("user_type_enum"),
+                 name=data.get("name"),
+                 phone=data.get("phone"),
+                 company_name=data.get("company_name"),
+                 company_inn=data.get("company_inn"),  # здесь будет PIB для Сербии
+                 contact_person=data.get("contact_person"),
+                 registered=True,
+             )
+             db.add(user)
+         else:
+             user.user_type = data.get("user_type_enum")
+             user.name = data.get("name")
+             user.phone = data.get("phone")
+             user.company_name = data.get("company_name")
+             user.company_inn = data.get("company_inn")
+             user.contact_person = data.get("contact_person")
+             user.registered = True
+             
         db.commit()
         await message.answer("✅ Регистрация завершена. Спасибо!", reply_markup=main_menu_kb())
         logger.info(f"User registered: {telegram_id}, type: {user.user_type}")
     except Exception as e:
-        logger.error(f"Registration error: {e}")
+        import traceback
+        logger.error(f"Registration error: {e}\n{traceback.format_exc()}")
         await message.answer("❌ Ошибка при регистрации. Попробуйте позже.", reply_markup=main_menu_kb())
     finally:
         db.close()
