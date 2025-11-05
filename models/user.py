@@ -1,4 +1,4 @@
-﻿from sqlalchemy import Column, Integer, String, Boolean, Enum
+﻿from sqlalchemy import Column, Integer, String, Boolean, Enum, BigInteger
 from database import Base
 import enum
 
@@ -11,7 +11,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    telegram_id = Column(Integer, unique=True, index=True, nullable=False)
+    telegram_id = Column(BigInteger, unique=True, index=True, nullable=False)
     user_type = Column(Enum(UserType), nullable=False)
     name = Column(String, nullable=False)
     phone = Column(String, nullable=True)
