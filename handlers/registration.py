@@ -4,8 +4,10 @@ from aiogram.dispatcher.filters.state import State, StatesGroup
 from database import SessionLocal
 from keyboards.inline import user_type_keyboard, cancel_keyboard
 from models.user import User, UserType
+from models.car import Car
 from loguru import logger
 import re
+
 
 def normalize_phone(raw: str) -> str:
     s = (raw or "").strip()
@@ -67,7 +69,7 @@ async def get_company_name_handler(message: types.Message, state: FSMContext):
 async def get_phone_handler(message: types.Message, state: FSMContext):
     phone = normalize_phone(message.text)
     await state.update_data(phone=phone)
-    
+
     data = await state.get_data()
     user_type = data.get("user_type_enum")
 
@@ -92,6 +94,7 @@ async def get_contact_person_handler(message: types.Message, state: FSMContext):
 
 async def save_user_and_finish(message: types.Message, state: FSMContext, data: dict):
     from handlers.menu import main_menu_kb
+    from keyboards.inline import date_from_kb
     db = SessionLocal()
     try:
         telegram_id = message.from_user.id
@@ -104,7 +107,7 @@ async def save_user_and_finish(message: types.Message, state: FSMContext, data: 
                 name=data.get("name"),
                 phone=data.get("phone"),
                 company_name=data.get("company_name"),
-                company_inn=data.get("company_inn"),  # здесь будет PIB для Сербии
+                company_inn=data.get("company_inn"),
                 contact_person=data.get("contact_person"),
                 registered=True,
             )
@@ -121,23 +124,48 @@ async def save_user_and_finish(message: types.Message, state: FSMContext, data: 
         db.commit()
         await message.answer("✅ Регистрация завершена. Спасибо!", reply_markup=main_menu_kb())
         logger.info(f"User registered: {telegram_id}, type: {user.user_type}")
-    except Exception as e:
-        import traceback
-        logger.error(f"Registration error: {e}\n{traceback.format_exc()}")
-        await message.answer("❌ Ошибка при регистрации. Попробуйте позже.", reply_markup=main_menu_kb())
-    finally:
-        db.close()
-        # ⬇️ если регистрация запущена прямо из бронирования — продолжаем бронирование
-        data_after = await state.get_data()
-        if data_after.get("resume_booking"):
-            from handlers.bookings import BookingFSM, date_from_kb
+
+        # ⬇️ ВАЖНО: Проверяем, нужно ли продолжить бронирование
+        state_data = await state.get_data()
+
+        if state_data.get("resume_booking"):
+            # Восстанавливаем данные бронирования
+            from handlers.bookings import BookingFSM
+
+            # Завершаем состояние регистрации
+            await state.finish()
+
+            # Восстанавливаем выбранный автомобиль
+            car_id = state_data.get("selected_car_id")
+            db_car = SessionLocal()
+            car = db_car.query(Car).filter(Car.id == car_id).first()
+            db_car.close()
+
+            if car and car.photo_file_id:
+                await message.answer_photo(
+                    photo=car.photo_file_id,
+                    caption=f"{car.brand} {car.model} ({car.year})"
+                )
+
+            # Продолжаем с выбора даты
             await message.answer(
                 "Отлично! Теперь укажите дату начала аренды (ДД.ММ.ГГГГ):",
                 reply_markup=date_from_kb()
             )
             await BookingFSM.select_date_from.set()
             return
-        await state.finish()
+
+    except Exception as e:
+        import traceback
+        logger.error(f"Registration error: {e}\n{traceback.format_exc()}")
+        await message.answer("❌ Ошибка при регистрации. Попробуйте позже.", reply_markup=main_menu_kb())
+    finally:
+        db.close()
+        # Завершаем состояние только если не перешли к бронированию
+        current_state = await state.get_state()
+        if current_state and "RegistrationFSM" in current_state:
+            await state.finish()
+
 
 async def cancel_registration_handler(event: types.Message | types.CallbackQuery, state: FSMContext):
     from handlers.menu import main_menu_kb
@@ -151,8 +179,10 @@ async def cancel_registration_handler(event: types.Message | types.CallbackQuery
 
 
 def register_registration_handlers(dp: Dispatcher):
-    dp.register_callback_query_handler(user_type_callback_handler, lambda c: c.data.startswith("user_type_"), state=RegistrationFSM.user_type)
-    dp.register_callback_query_handler(cancel_registration_handler, lambda c: c.data == "cancel_registration", state="*")
+    dp.register_callback_query_handler(user_type_callback_handler, lambda c: c.data.startswith("user_type_"),
+                                       state=RegistrationFSM.user_type)
+    dp.register_callback_query_handler(cancel_registration_handler, lambda c: c.data == "cancel_registration",
+                                       state="*")
     dp.register_message_handler(get_name_handler, state=RegistrationFSM.get_name)
     dp.register_message_handler(get_company_name_handler, state=RegistrationFSM.get_company_name)
     dp.register_message_handler(get_phone_handler, state=RegistrationFSM.get_phone)

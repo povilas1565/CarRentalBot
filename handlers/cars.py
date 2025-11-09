@@ -182,10 +182,20 @@ async def confirm_add(callback: CallbackQuery, state: FSMContext):
         try:
             user = db.query(User).filter(User.telegram_id == callback.from_user.id).first()
             if not user:
-                await callback.message.edit_text("❌ Сначала зарегистрируйтесь.")
-                return
+                # Создаем пользователя если не найден (даже без регистрации)
+                user = User(
+                    telegram_id=callback.from_user.id,
+                    user_type=None,
+                    name=None,
+                    phone=None,
+                    registered=False
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+
             car = Car(
-                owner_id=user.id,
+                owner_id=user.id,  # используем ID даже незарегистрированного пользователя
                 brand=d["brand"],
                 model=d["model"],
                 year=d["year"],
@@ -212,8 +222,7 @@ async def confirm_add(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# ===== Редактирование и удаление — оставил без изменений =====
-# (твой код редактирования останется, только кнопки skip будут ловиться)
+# ===== Редактирование и удаление =====
 
 async def list_user_cars(msg: types.Message, state: FSMContext):
     db = SessionLocal()
@@ -263,7 +272,7 @@ async def choose_field(callback: CallbackQuery, state: FSMContext):
     elif field == "Фото":
         await callback.message.edit_text("📸 Отправьте новое фото или нажмите 'Пропустить':",
                                          reply_markup=kb_skip_cancel())
-        await EditCarFSM.upload_photo.set();
+        await EditCarFSM.upload_photo.set()
         return
 
     await callback.message.edit_text(f"Введите новое значение для '{field}':", reply_markup=kb_back())
@@ -278,7 +287,7 @@ async def update_value(msg: types.Message, state: FSMContext):
     db = SessionLocal()
     car = db.query(Car).filter(Car.id == car_id).first()
     if not car:
-        await msg.answer("Авто не найден.");
+        await msg.answer("Авто не найден.")
         await state.finish()
         db.close()
         return
@@ -320,9 +329,9 @@ async def edit_upload_photo(msg: types.Message, state: FSMContext):
     db = SessionLocal()
     car = db.query(Car).filter(Car.id == car_id).first()
     if not car:
-        await msg.answer("Авто не найдено.");
-        await state.finish();
-        db.close();
+        await msg.answer("Авто не найдено.")
+        await state.finish()
+        db.close()
         return
 
     if msg.photo:
@@ -337,7 +346,7 @@ async def edit_upload_photo(msg: types.Message, state: FSMContext):
 
     else:
         await msg.answer("Отправьте изображение или нажмите 'Пропустить'.", reply_markup=kb_skip_cancel())
-        db.close();
+        db.close()
         return
 
     db.close()

@@ -15,6 +15,7 @@ from keyboards.inline import (
     confirm_booking_kb, date_from_kb, date_to_kb
 )
 
+
 class BookingFSM(StatesGroup):
     select_city = State()
     select_car = State()
@@ -55,12 +56,11 @@ async def select_city_handler(callback: types.CallbackQuery, state: FSMContext):
 async def select_car(callback: types.CallbackQuery, state: FSMContext):
     car_id = int(callback.data.split(":")[1])
     data = await state.get_data()
-    await state.update_data(selected_car_id=car_id)
-    
+
     db: Session = SessionLocal()
     try:
         car = db.query(Car).filter(Car.id == car_id).first()
-        # ⬇️ Проверяем регистрацию прямо тут
+        # ⬇️ Проверяем регистрацию
         user_exists = db.query(User).filter(
             User.telegram_id == callback.from_user.id,
             User.registered == True
@@ -69,11 +69,19 @@ async def select_car(callback: types.CallbackQuery, state: FSMContext):
         db.close()
 
     if not user_exists:
-        # помечаем, что после регистрации надо продолжить бронирование
-        await state.update_data(resume_booking=True)
+        # Сохраняем ВСЕ данные для восстановления после регистрации
+        await state.update_data(
+            resume_booking=True,
+            selected_car_id=car_id,
+            booking_city=data.get("city"),
+            available_cars=data.get("available_cars")
+        )
         from handlers.registration import start_registration
         await start_registration(callback.message, state)
         return
+
+    # Если пользователь зарегистрирован - продолжаем бронирование
+    await state.update_data(selected_car_id=car_id)
 
     if car and car.photo_file_id:
         await callback.message.answer_photo(photo=car.photo_file_id, caption=f"{car.brand} {car.model} ({car.year})")

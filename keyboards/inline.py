@@ -1,6 +1,7 @@
 ﻿from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from models.constants import POPULAR_CITIES
 
+
 def get_city_kb():
     kb = InlineKeyboardMarkup(row_width=2)
     for city in POPULAR_CITIES:
@@ -33,8 +34,10 @@ def date_from_kb():
 def date_to_kb():
     return InlineKeyboardMarkup().add(InlineKeyboardButton("⬅️ Назад", callback_data="back:date_from"))
 
+
 def kb_back():
     return InlineKeyboardMarkup().add(InlineKeyboardButton("⬅️ Назад", callback_data="cancel"))
+
 
 def kb_confirm():
     return InlineKeyboardMarkup(row_width=2).add(
@@ -42,11 +45,13 @@ def kb_confirm():
         InlineKeyboardButton("❌ Нет", callback_data="confirm_no")
     )
 
+
 def kb_skip_cancel():
     return InlineKeyboardMarkup(row_width=2).add(
         InlineKeyboardButton("Пропустить", callback_data="skip"),
         InlineKeyboardButton("⬅️ Назад", callback_data="cancel")
     )
+
 
 def cancel_kb():
     return InlineKeyboardMarkup().add(InlineKeyboardButton("❌ Отмена", callback_data="cancel"))
@@ -58,6 +63,7 @@ def comment_kb():
         InlineKeyboardButton("❌ Отмена", callback_data="cancel")
     )
 
+
 def user_type_keyboard():
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(
@@ -68,10 +74,12 @@ def user_type_keyboard():
     )
     return keyboard
 
+
 def cancel_keyboard():
     return InlineKeyboardMarkup().add(
         InlineKeyboardButton("⬅️ Назад", callback_data="cancel_registration")
     )
+
 
 def payment_confirmation_kb(payment_id: int):
     kb = InlineKeyboardMarkup(row_width=2)
@@ -80,4 +88,16 @@ def payment_confirmation_kb(payment_id: int):
         InlineKeyboardButton("❌ Отменить оплату", callback_data=f"pay_cancel_confirm_{payment_id}"),
     )
     kb.add(InlineKeyboardButton("⬅️ Назад", callback_data="submenu_payments"))
+    return kb
+
+
+def date_from_kb():
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("⬅️ Назад", callback_data="back:car"))
+    return kb
+
+
+def date_to_kb():
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("⬅️ Назад", callback_data="back:date_from"))
     return kb
