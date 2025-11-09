@@ -125,7 +125,7 @@ async def save_user_and_finish(message: types.Message, state: FSMContext, data: 
         await message.answer("✅ Регистрация завершена. Спасибо!", reply_markup=main_menu_kb())
         logger.info(f"User registered: {telegram_id}, type: {user.user_type}")
 
-        # ⬇️ ВАЖНО: Проверяем, нужно ли продолжить бронирование
+        # ⬇️ ВАЖНО: Проверяем, нужно ли продолжить бронирование ИЛИ добавление авто
         state_data = await state.get_data()
 
         if state_data.get("resume_booking"):
@@ -155,13 +155,26 @@ async def save_user_and_finish(message: types.Message, state: FSMContext, data: 
             await BookingFSM.select_date_from.set()
             return
 
+        elif state_data.get("resume_add_car"):
+            # Восстанавливаем добавление авто
+            from handlers.cars import AddCarFSM
+
+            # Завершаем состояние регистрации
+            await state.finish()
+
+            # Продолжаем с добавления авто
+            await message.answer("Отлично! Теперь вы можете добавить автомобиль.", reply_markup=main_menu_kb())
+            # Можно автоматически запустить процесс добавления авто:
+            # await message.answer("Введите марку:", reply_markup=kb_back())
+            # await AddCarFSM.brand.set()
+
     except Exception as e:
         import traceback
         logger.error(f"Registration error: {e}\n{traceback.format_exc()}")
         await message.answer("❌ Ошибка при регистрации. Попробуйте позже.", reply_markup=main_menu_kb())
     finally:
         db.close()
-        # Завершаем состояние только если не перешли к бронированию
+        # Завершаем состояние только если не перешли к другому процессу
         current_state = await state.get_state()
         if current_state and "RegistrationFSM" in current_state:
             await state.finish()

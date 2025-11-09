@@ -41,6 +41,20 @@ async def cancel_handler(callback: CallbackQuery, state: FSMContext):
 
 # ===== Добавление авто =====
 async def add_car_start(msg: types.Message, state: FSMContext):
+    # Проверяем регистрацию
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.telegram_id == msg.from_user.id, User.registered == True).first()
+        if not user:
+            await msg.answer("⚠️ Для сдачи автомобиля необходимо зарегистрироваться.")
+            # Помечаем, что после регистрации нужно продолжить добавление авто
+            await state.update_data(resume_add_car=True)
+            from handlers.registration import start_registration
+            await start_registration(msg, state)
+            return
+    finally:
+        db.close()
+
     await msg.answer("Введите марку:", reply_markup=kb_back())
     await AddCarFSM.brand.set()
 
@@ -182,20 +196,10 @@ async def confirm_add(callback: CallbackQuery, state: FSMContext):
         try:
             user = db.query(User).filter(User.telegram_id == callback.from_user.id).first()
             if not user:
-                # Создаем пользователя если не найден (даже без регистрации)
-                user = User(
-                    telegram_id=callback.from_user.id,
-                    user_type=None,
-                    name=None,
-                    phone=None,
-                    registered=False
-                )
-                db.add(user)
-                db.commit()
-                db.refresh(user)
-
+                await callback.message.edit_text("❌ Сначала зарегистрируйтесь.")
+                return
             car = Car(
-                owner_id=user.id,  # используем ID даже незарегистрированного пользователя
+                owner_id=user.id,
                 brand=d["brand"],
                 model=d["model"],
                 year=d["year"],
@@ -272,7 +276,7 @@ async def choose_field(callback: CallbackQuery, state: FSMContext):
     elif field == "Фото":
         await callback.message.edit_text("📸 Отправьте новое фото или нажмите 'Пропустить':",
                                          reply_markup=kb_skip_cancel())
-        await EditCarFSM.upload_photo.set()
+        await EditCarFSM.upload_photo.set();
         return
 
     await callback.message.edit_text(f"Введите новое значение для '{field}':", reply_markup=kb_back())
@@ -287,7 +291,7 @@ async def update_value(msg: types.Message, state: FSMContext):
     db = SessionLocal()
     car = db.query(Car).filter(Car.id == car_id).first()
     if not car:
-        await msg.answer("Авто не найден.")
+        await msg.answer("Авто не найден.");
         await state.finish()
         db.close()
         return
@@ -329,9 +333,9 @@ async def edit_upload_photo(msg: types.Message, state: FSMContext):
     db = SessionLocal()
     car = db.query(Car).filter(Car.id == car_id).first()
     if not car:
-        await msg.answer("Авто не найдено.")
-        await state.finish()
-        db.close()
+        await msg.answer("Авто не найдено.");
+        await state.finish();
+        db.close();
         return
 
     if msg.photo:
@@ -346,7 +350,7 @@ async def edit_upload_photo(msg: types.Message, state: FSMContext):
 
     else:
         await msg.answer("Отправьте изображение или нажмите 'Пропустить'.", reply_markup=kb_skip_cancel())
-        db.close()
+        db.close();
         return
 
     db.close()

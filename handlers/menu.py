@@ -13,6 +13,7 @@ from models.car import Car
 from models.payment import Payment, PaymentStatus
 from models.user import User
 
+
 # FSM для подтверждений
 class MenuFSM(StatesGroup):
     waiting_for_confirmation = State()
@@ -88,7 +89,11 @@ async def process_menu_callbacks(callback: types.CallbackQuery, state: FSMContex
         return
 
     if data == "cmd_add_car":
-        # УБРАЛИ проверку регистрации для добавления авто
+        # ВОЗВРАЩАЕМ проверку регистрации для добавления авто
+        if not await require_registration(callback.message):
+            await callback.message.answer("⚠️ Для сдачи автомобиля необходимо зарегистрироваться.")
+            await start_registration(callback.message, state)
+            return
         await callback.message.delete()
         await cars.add_car_start(callback.message, state)
         await callback.answer()
