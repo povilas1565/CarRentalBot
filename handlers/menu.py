@@ -30,7 +30,7 @@ def main_menu_kb():
         InlineKeyboardButton("📄 Договоры", callback_data="submenu_contracts"),
         InlineKeyboardButton("💳 Оплата", callback_data="submenu_payments"),
         InlineKeyboardButton("📝 Оставить отзыв", callback_data="cmd_review"),
-        InlineKeyboardButton("⭐️ Просмотреть отзывы", callback_data="cmd_reviews"),
+        InlineKeyboardButton("⭐️ Просмотреть отзывs", callback_data="cmd_reviews"),
     )
     return kb
 
@@ -83,15 +83,22 @@ async def process_menu_callbacks(callback: types.CallbackQuery, state: FSMContex
         return
 
     if data == "cmd_book":
+        if not await require_registration(callback.message):
+            await callback.message.answer("⚠️ Для бронирования необходимо зарегистрироваться.")
+            # Сохраняем информацию о том, откуда пришли
+            await state.update_data(return_to="booking")
+            await start_registration(callback.message, state)
+            return
         await callback.message.delete()
         await start_booking(callback.message, state)
         await callback.answer()
         return
 
     if data == "cmd_add_car":
-        # ВОЗВРАЩАЕМ проверку регистрации для добавления авто
         if not await require_registration(callback.message):
             await callback.message.answer("⚠️ Для сдачи автомобиля необходимо зарегистрироваться.")
+            # Сохраняем информацию о том, откуда пришли
+            await state.update_data(return_to="add_car")
             await start_registration(callback.message, state)
             return
         await callback.message.delete()
@@ -102,6 +109,8 @@ async def process_menu_callbacks(callback: types.CallbackQuery, state: FSMContex
     if data == "cmd_my_cars":
         if not await require_registration(callback.message):
             await callback.message.answer("⚠️ Для просмотра своих авто необходимо зарегистрироваться.")
+            # Сохраняем информацию о том, откуда пришли
+            await state.update_data(return_to="my_cars")
             await start_registration(callback.message, state)
             return
         await callback.message.delete()

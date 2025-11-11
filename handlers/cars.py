@@ -41,20 +41,6 @@ async def cancel_handler(callback: CallbackQuery, state: FSMContext):
 
 # ===== Добавление авто =====
 async def add_car_start(msg: types.Message, state: FSMContext):
-    # Проверяем регистрацию
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.telegram_id == msg.from_user.id, User.registered == True).first()
-        if not user:
-            await msg.answer("⚠️ Для сдачи автомобиля необходимо зарегистрироваться.")
-            # Помечаем, что после регистрации нужно продолжить добавление авто
-            await state.update_data(resume_add_car=True)
-            from handlers.registration import start_registration
-            await start_registration(msg, state)
-            return
-    finally:
-        db.close()
-
     await msg.answer("Введите марку:", reply_markup=kb_back())
     await AddCarFSM.brand.set()
 

@@ -69,14 +69,15 @@ async def select_car(callback: types.CallbackQuery, state: FSMContext):
         db.close()
 
     if not user_exists:
-        # Сохраняем ВСЕ данные для восстановления после регистрации
+        # Сохраняем данные для восстановления
         await state.update_data(
-            resume_booking=True,
             selected_car_id=car_id,
             booking_city=data.get("city"),
-            available_cars=data.get("available_cars")
+            available_cars=data.get("available_cars"),
+            return_to="booking_car_selected"  # специальный маркер
         )
         from handlers.registration import start_registration
+        await callback.message.answer("⚠️ Для бронирования необходимо зарегистрироваться.")
         await start_registration(callback.message, state)
         return
 
@@ -88,7 +89,6 @@ async def select_car(callback: types.CallbackQuery, state: FSMContext):
 
     await callback.message.answer("Введите дату начала аренды (ДД.ММ.ГГГГ):", reply_markup=date_from_kb())
     await BookingFSM.select_date_from.set()
-
 
 # Шаг 4 — дата начала
 async def select_date_from(msg: types.Message, state: FSMContext):

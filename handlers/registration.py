@@ -94,7 +94,6 @@ async def get_contact_person_handler(message: types.Message, state: FSMContext):
 
 async def save_user_and_finish(message: types.Message, state: FSMContext, data: dict):
     from handlers.menu import main_menu_kb
-    from keyboards.inline import date_from_kb
     db = SessionLocal()
     try:
         telegram_id = message.from_user.id
@@ -122,51 +121,38 @@ async def save_user_and_finish(message: types.Message, state: FSMContext, data: 
             user.registered = True
 
         db.commit()
-        await message.answer("✅ Регистрация завершена. Спасибо!", reply_markup=main_menu_kb())
         logger.info(f"User registered: {telegram_id}, type: {user.user_type}")
 
-        # ⬇️ ВАЖНО: Проверяем, нужно ли продолжить бронирование ИЛИ добавление авто
+        # ⬇️ ВАЖНО: Получаем данные состояния ДО завершения
         state_data = await state.get_data()
+        return_to = state_data.get('return_to')
 
-        if state_data.get("resume_booking"):
-            # Восстанавливаем данные бронирования
-            from handlers.bookings import BookingFSM
+        # Завершаем состояние регистрации
+        await state.finish()
 
-            # Завершаем состояние регистрации
-            await state.finish()
+        # В зависимости от того, откуда пришли - продолжаем соответствующий процесс
+        if return_to == "add_car":
+            from handlers.cars import add_car_start
+            await message.answer("✅ Регистрация завершена! Теперь вы можете добавить автомобиль.")
+            await add_car_start(message, state)
 
-            # Восстанавливаем выбранный автомобиль
-            car_id = state_data.get("selected_car_id")
-            db_car = SessionLocal()
-            car = db_car.query(Car).filter(Car.id == car_id).first()
-            db_car.close()
+        elif return_to == "my_cars":
+            from handlers.cars import list_user_cars
+            await message.answer("✅ Регистрация завершена! Вот ваши автомобили:")
+            await list_user_cars(message, state)
 
-            if car and car.photo_file_id:
-                await message.answer_photo(
-                    photo=car.photo_file_id,
-                    caption=f"{car.brand} {car.model} ({car.year})"
-                )
+        elif return_to == "booking":
+            from handlers.bookings import start_booking
+            await message.answer("✅ Регистрация завершена! Теперь вы можете забронировать автомобиль.")
+            await start_booking(message, state)
 
-            # Продолжаем с выбора даты
-            await message.answer(
-                "Отлично! Теперь укажите дату начала аренды (ДД.ММ.ГГГГ):",
-                reply_markup=date_from_kb()
-            )
-            await BookingFSM.select_date_from.set()
-            return
+        elif return_to == "booking_car_selected":
+            # Используем специальную функцию для продолжения бронирования
+            await continue_after_registration(message, state)
 
-        elif state_data.get("resume_add_car"):
-            # Восстанавливаем добавление авто
-            from handlers.cars import AddCarFSM
-
-            # Завершаем состояние регистрации
-            await state.finish()
-
-            # Продолжаем с добавления авто
-            await message.answer("Отлично! Теперь вы можете добавить автомобиль.", reply_markup=main_menu_kb())
-            # Можно автоматически запустить процесс добавления авто:
-            # await message.answer("Введите марку:", reply_markup=kb_back())
-            # await AddCarFSM.brand.set()
+        else:
+            # Если пришли напрямую (не из другого процесса)
+            await message.answer("✅ Регистрация завершена. Спасибо!", reply_markup=main_menu_kb())
 
     except Exception as e:
         import traceback
@@ -174,10 +160,40 @@ async def save_user_and_finish(message: types.Message, state: FSMContext, data: 
         await message.answer("❌ Ошибка при регистрации. Попробуйте позже.", reply_markup=main_menu_kb())
     finally:
         db.close()
-        # Завершаем состояние только если не перешли к другому процессу
-        current_state = await state.get_state()
-        if current_state and "RegistrationFSM" in current_state:
-            await state.finish()
+
+
+async def continue_after_registration(message: types.Message, state: FSMContext):
+    """Продолжение процесса после регистрации при выборе авто в бронировании"""
+    from handlers.menu import main_menu_kb
+
+    state_data = await state.get_data()
+    return_to = state_data.get('return_to')
+
+    if return_to == "booking_car_selected":
+        # Восстанавливаем данные бронирования
+        from handlers.bookings import BookingFSM
+        from keyboards.inline import date_from_kb
+
+        car_id = state_data.get("selected_car_id")
+        db = SessionLocal()
+        try:
+            car = db.query(Car).filter(Car.id == car_id).first()
+            if car and car.photo_file_id:
+                await message.answer_photo(
+                    photo=car.photo_file_id,
+                    caption=f"{car.brand} {car.model} ({car.year})"
+                )
+
+            await message.answer(
+                "Отлично! Теперь укажите дату начала аренды (ДД.ММ.ГГГГ):",
+                reply_markup=date_from_kb()
+            )
+            await BookingFSM.select_date_from.set()
+        finally:
+            db.close()
+    else:
+        # Если нет специального маркера, просто показываем главное меню
+        await message.answer("✅ Регистрация завершена!", reply_markup=main_menu_kb())
 
 
 async def cancel_registration_handler(event: types.Message | types.CallbackQuery, state: FSMContext):
@@ -201,3 +217,4 @@ def register_registration_handlers(dp: Dispatcher):
     dp.register_message_handler(get_phone_handler, state=RegistrationFSM.get_phone)
     dp.register_message_handler(get_inn_handler, state=RegistrationFSM.get_inn)
     dp.register_message_handler(get_contact_person_handler, state=RegistrationFSM.get_contact_person)
+    dp.register_message_handler(continue_after_registration, state="*")
