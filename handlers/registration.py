@@ -128,27 +128,31 @@ async def save_user_and_finish(message: types.Message, state: FSMContext, data: 
         return_to = state_data.get('return_to')
 
         # Завершаем состояние регистрации
-        await state.finish()
+       # await state.finish()
 
         # В зависимости от того, откуда пришли - продолжаем соответствующий процесс
         if return_to == "add_car":
             from handlers.cars import add_car_start
             await message.answer("✅ Регистрация завершена! Теперь вы можете добавить автомобиль.")
             await add_car_start(message, state)
+            return
 
         elif return_to == "my_cars":
             from handlers.cars import list_user_cars
             await message.answer("✅ Регистрация завершена! Вот ваши автомобили:")
             await list_user_cars(message, state)
+            return
 
         elif return_to == "booking":
             from handlers.bookings import start_booking
             await message.answer("✅ Регистрация завершена! Теперь вы можете забронировать автомобиль.")
             await start_booking(message, state)
+            return
 
         elif return_to == "booking_car_selected":
             # Используем специальную функцию для продолжения бронирования
             await continue_after_registration(message, state)
+            return
 
         else:
             # Если пришли напрямую (не из другого процесса)
